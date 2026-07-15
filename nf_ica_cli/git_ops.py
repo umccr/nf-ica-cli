@@ -146,6 +146,59 @@ def clone_at_commit(
     )
 
 
+def ensure_on_up_to_date_main(repo_dir: Path) -> None:
+    """Ensure the repository is on the main branch and up-to-date with its remote.
+
+    Fetches the remote tracking branch and compares the local HEAD against
+    the remote main. Fails if:
+    - The current branch is not 'main'
+    - The local main is behind the remote (needs pull)
+    - There is no remote tracking branch configured
+
+    Parameters
+    ----------
+    repo_dir : Path
+        Path to the git repository.
+
+    Raises
+    ------
+    RuntimeError
+        If the branch is not main or if the local branch is behind the remote.
+    """
+    # 1. Check we're on the main branch
+    result = _run_git(
+        ["rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo_dir,
+        error_context="Failed to determine current branch",
+    )
+    current_branch = result.stdout.strip()
+    if current_branch != "main":
+        raise RuntimeError(
+            f"Current branch is '{current_branch}', but 'make-workflow-version' "
+            f"can only be run on the 'main' branch."
+        )
+
+    # 2. Fetch the latest from the remote tracking branch
+    _run_git(
+        ["fetch", "origin", "main"],
+        cwd=repo_dir,
+        error_context="Failed to fetch 'origin/main'",
+    )
+
+    # 3. Check local main is not behind origin/main
+    result = _run_git(
+        ["rev-list", "--count", "HEAD..origin/main"],
+        cwd=repo_dir,
+        error_context="Failed to compare local branch with 'origin/main'",
+    )
+    behind_count = int(result.stdout.strip())
+    if behind_count > 0:
+        raise RuntimeError(
+            f"Local 'main' is {behind_count} commit(s) behind 'origin/main'. "
+            f"Please pull the latest changes before creating a workflow version tag."
+        )
+
+
 def get_tag_message(repo_dir: Path, tag_name: str) -> str:
     """Retrieve the message of an annotated tag.
 
