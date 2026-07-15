@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nf-ica-cli"
+version = "0.1.0"
+description = "CLI toolkit for orchestrating Nextflow pipeline deployments to Illumina Connected Analytics (ICA)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "docopt>=0.6.2",
+    "ruamel.yaml>=0.18.0",
+    "wrapica>=2.0.0",
+    "boto3>=1.28.0",
+    "snakemd>=2.0.0",
+]
+
+[project.scripts]
+nf-ica = "nf_ica_cli.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "hypothesis>=6.0.0",
+    "pytest-mock>=3.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests",
+    "property: Property-based tests",
+    "integration: Integration tests",
+]
