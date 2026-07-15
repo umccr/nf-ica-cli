@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List
 
 from nf_ica_cli.config import AppConfig
-from nf_ica_cli.git_ops import create_annotated_tag, tag_exists
+from nf_ica_cli.git_ops import create_annotated_tag, ensure_on_up_to_date_main, tag_exists
 from nf_ica_cli.tag_codec import TagMetadata, encode_tag_message, make_tag_name
 from nf_ica_cli.validators import validate_context, validate_release_status
 
@@ -26,10 +26,11 @@ def handle_make_workflow_version(args: dict, config: AppConfig, config_repo: Pat
     3. Validate each context value against defined contexts
     4. Verify version tag is registered in workflows.yaml for the workflow
     5. Verify each patch name exists in the patches registry
-    6. Generate tag name with UTC timestamp
-    7. Check tag doesn't already exist
-    8. Encode tag metadata as YAML
-    9. Create annotated tag
+    6. Ensure we're on an up-to-date main branch
+    7. Generate tag name with UTC timestamp
+    8. Check tag doesn't already exist
+    9. Encode tag metadata as YAML
+    10. Create annotated tag
 
     Args:
         args: Parsed docopt arguments dict.
@@ -101,17 +102,25 @@ def handle_make_workflow_version(args: dict, config: AppConfig, config_repo: Pat
                 f"{', '.join(sorted(registered_patch_names)) if registered_patch_names else '(none)'}."
             )
 
-    # 6. Generate tag name with UTC timestamp (Req 3.1)
+    # 6. Ensure we're on an up-to-date main branch
+    try:
+        ensure_on_up_to_date_main(config_repo)
+    except RuntimeError as e:
+        raise SystemExit(
+            f"Error: [GIT] {e}"
+        ) from e
+
+    # 7. Generate tag name with UTC timestamp (Req 3.1)
     tag_name = make_tag_name(workflow_name, version_tag)
 
-    # 7. Check tag doesn't already exist (Req 3.8)
+    # 8. Check tag doesn't already exist (Req 3.8)
     if tag_exists(config_repo, tag_name):
         raise SystemExit(
             f"Error: [GIT] Tag '{tag_name}' already exists in the repository. "
             f"Cannot create a duplicate tag."
         )
 
-    # 8. Encode tag metadata as YAML (Req 3.2)
+    # 9. Encode tag metadata as YAML (Req 3.2)
     metadata = TagMetadata(
         git_commit_id=git_commit_id,
         contexts=contexts,
@@ -121,7 +130,7 @@ def handle_make_workflow_version(args: dict, config: AppConfig, config_repo: Pat
     )
     tag_message = encode_tag_message(metadata)
 
-    # 9. Create annotated tag (Req 3.1)
+    # 10. Create annotated tag (Req 3.1)
     try:
         create_annotated_tag(config_repo, tag_name, tag_message)
     except RuntimeError as e:
