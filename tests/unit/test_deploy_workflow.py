@@ -134,16 +134,14 @@ class TestHandleDeployWorkflow:
     @patch("nf_ica_cli.handlers.deploy_workflow.create_github_release")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline_zip")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline")
-    @patch("nf_ica_cli.handlers.deploy_workflow.find_existing_pipeline")
     @patch("nf_ica_cli.handlers.deploy_workflow.authenticate_oidc")
     @patch("nf_ica_cli.handlers.deploy_workflow.clone_at_commit")
     @patch("nf_ica_cli.handlers.deploy_workflow.get_tag_message")
-    def test_successful_deployment_new_pipeline(
+    def test_successful_deployment_creates_new_pipeline(
         self,
         mock_get_tag_message,
         mock_clone,
         mock_auth,
-        mock_find_pipeline,
         mock_create_pipeline,
         mock_create_zip,
         mock_create_release,
@@ -156,7 +154,6 @@ class TestHandleDeployWorkflow:
         mock_get_tag_message.return_value = TAG_MESSAGE
         mock_clone.return_value = None
         mock_auth.return_value = "jwt-token"
-        mock_find_pipeline.return_value = None  # No existing pipeline
         mock_create_pipeline.return_value = "new-pipeline-uuid"
         mock_create_zip.return_value = tmp_path / "output.zip"
 
@@ -180,43 +177,6 @@ class TestHandleDeployWorkflow:
         assert len(data["pipelines"]) == 1
         assert data["pipelines"][0]["pipeline_id"] == "new-pipeline-uuid"
         assert data["pipelines"][0]["workflow_name"] == "oncoanalyser"
-
-    @patch("nf_ica_cli.handlers.deploy_workflow.create_github_release")
-    @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline_zip")
-    @patch("nf_ica_cli.handlers.deploy_workflow.update_existing_pipeline")
-    @patch("nf_ica_cli.handlers.deploy_workflow.find_existing_pipeline")
-    @patch("nf_ica_cli.handlers.deploy_workflow.authenticate_oidc")
-    @patch("nf_ica_cli.handlers.deploy_workflow.clone_at_commit")
-    @patch("nf_ica_cli.handlers.deploy_workflow.get_tag_message")
-    def test_successful_deployment_existing_pipeline(
-        self,
-        mock_get_tag_message,
-        mock_clone,
-        mock_auth,
-        mock_find_pipeline,
-        mock_update_pipeline,
-        mock_create_zip,
-        mock_create_release,
-        tmp_path,
-    ):
-        """When pipeline exists, updates it instead of creating new one (Req 5.9)."""
-        config_repo = tmp_path / "config_repo"
-        _setup_pipelines_yaml(config_repo)
-
-        mock_get_tag_message.return_value = TAG_MESSAGE
-        mock_clone.return_value = None
-        mock_auth.return_value = "jwt-token"
-        mock_find_pipeline.return_value = "existing-pipeline-uuid"
-        mock_update_pipeline.return_value = None
-        mock_create_zip.return_value = tmp_path / "output.zip"
-
-        config = _make_app_config(config_repo)
-        args = _make_args()
-
-        handle_deploy_workflow(args, config, config_repo)
-
-        mock_update_pipeline.assert_called_once()
-        mock_create_release.assert_called_once()
 
     @patch("nf_ica_cli.handlers.deploy_workflow.get_tag_message")
     def test_exits_when_tag_message_retrieval_fails(
@@ -284,7 +244,6 @@ class TestHandleDeployWorkflow:
     @patch("nf_ica_cli.handlers.deploy_workflow.create_github_release")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline_zip")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline")
-    @patch("nf_ica_cli.handlers.deploy_workflow.find_existing_pipeline")
     @patch("nf_ica_cli.handlers.deploy_workflow.authenticate_oidc")
     @patch("nf_ica_cli.handlers.deploy_workflow.clone_at_commit")
     @patch("nf_ica_cli.handlers.deploy_workflow.get_tag_message")
@@ -293,7 +252,6 @@ class TestHandleDeployWorkflow:
         mock_get_tag_message,
         mock_clone,
         mock_auth,
-        mock_find_pipeline,
         mock_create_pipeline,
         mock_create_zip,
         mock_create_release,
@@ -311,7 +269,6 @@ class TestHandleDeployWorkflow:
             RuntimeError("OIDC failed"),
             "jwt-token-2",
         ]
-        mock_find_pipeline.return_value = None
         mock_create_pipeline.return_value = "pipeline-uuid-2"
         mock_create_zip.return_value = tmp_path / "output.zip"
 
@@ -405,7 +362,6 @@ workflow_version_description: ''
     @patch("nf_ica_cli.handlers.deploy_workflow.create_github_release")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline_zip")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline")
-    @patch("nf_ica_cli.handlers.deploy_workflow.find_existing_pipeline")
     @patch("nf_ica_cli.handlers.deploy_workflow.authenticate_oidc")
     @patch("nf_ica_cli.handlers.deploy_workflow.clone_at_commit")
     @patch("nf_ica_cli.handlers.deploy_workflow.get_tag_message")
@@ -414,7 +370,6 @@ workflow_version_description: ''
         mock_get_tag_message,
         mock_clone,
         mock_auth,
-        mock_find_pipeline,
         mock_create_pipeline,
         mock_create_zip,
         mock_create_release,
@@ -427,7 +382,6 @@ workflow_version_description: ''
         mock_get_tag_message.return_value = TAG_MESSAGE
         mock_clone.return_value = None
         mock_auth.return_value = "jwt-token"
-        mock_find_pipeline.return_value = None
         mock_create_pipeline.return_value = "new-pipeline-uuid"
         mock_create_zip.return_value = tmp_path / "output.zip"
 
@@ -451,7 +405,6 @@ workflow_version_description: ''
     @patch("nf_ica_cli.handlers.deploy_workflow.create_github_release")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline_zip")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline")
-    @patch("nf_ica_cli.handlers.deploy_workflow.find_existing_pipeline")
     @patch("nf_ica_cli.handlers.deploy_workflow.authenticate_oidc")
     @patch("nf_ica_cli.handlers.deploy_workflow.clone_at_commit")
     @patch("nf_ica_cli.handlers.deploy_workflow.get_tag_message")
@@ -460,7 +413,6 @@ workflow_version_description: ''
         mock_get_tag_message,
         mock_clone,
         mock_auth,
-        mock_find_pipeline,
         mock_create_pipeline,
         mock_create_zip,
         mock_create_release,
@@ -473,7 +425,6 @@ workflow_version_description: ''
         mock_get_tag_message.return_value = TAG_MESSAGE
         mock_clone.return_value = None
         mock_auth.return_value = "jwt-token"
-        mock_find_pipeline.return_value = None
         mock_create_pipeline.return_value = "pipeline-uuid"
         mock_create_zip.return_value = tmp_path / "output.zip"
 
@@ -499,7 +450,6 @@ workflow_version_description: ''
     @patch("nf_ica_cli.handlers.deploy_workflow.create_github_release")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline_zip")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline")
-    @patch("nf_ica_cli.handlers.deploy_workflow.find_existing_pipeline")
     @patch("nf_ica_cli.handlers.deploy_workflow.authenticate_oidc")
     @patch("nf_ica_cli.handlers.deploy_workflow.clone_at_commit")
     @patch("nf_ica_cli.handlers.deploy_workflow.get_tag_message")
@@ -508,7 +458,6 @@ workflow_version_description: ''
         mock_get_tag_message,
         mock_clone,
         mock_auth,
-        mock_find_pipeline,
         mock_create_pipeline,
         mock_create_zip,
         mock_create_release,
@@ -521,7 +470,6 @@ workflow_version_description: ''
         mock_get_tag_message.return_value = TAG_MESSAGE
         mock_clone.return_value = None
         mock_auth.return_value = "jwt-token"
-        mock_find_pipeline.return_value = None
         mock_create_pipeline.side_effect = ["pipeline-1", "pipeline-2"]
         mock_create_zip.return_value = tmp_path / "output.zip"
 
@@ -546,7 +494,6 @@ workflow_version_description: ''
     @patch("nf_ica_cli.handlers.deploy_workflow.create_github_release")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline_zip")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline")
-    @patch("nf_ica_cli.handlers.deploy_workflow.find_existing_pipeline")
     @patch("nf_ica_cli.handlers.deploy_workflow.authenticate_oidc")
     @patch("nf_ica_cli.handlers.deploy_workflow.clone_at_commit")
     @patch("nf_ica_cli.handlers.deploy_workflow.get_tag_message")
@@ -555,7 +502,6 @@ workflow_version_description: ''
         mock_get_tag_message,
         mock_clone,
         mock_auth,
-        mock_find_pipeline,
         mock_create_pipeline,
         mock_create_zip,
         mock_create_release,
@@ -568,7 +514,6 @@ workflow_version_description: ''
         mock_get_tag_message.return_value = TAG_MESSAGE
         mock_clone.return_value = None
         mock_auth.return_value = "jwt-token"
-        mock_find_pipeline.return_value = None
         mock_create_pipeline.return_value = "pipeline-uuid"
         mock_create_zip.return_value = tmp_path / "output.zip"
 

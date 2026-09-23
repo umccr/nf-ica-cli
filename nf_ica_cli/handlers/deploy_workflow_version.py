@@ -1,4 +1,4 @@
-"""Handler for the make-workflow-version subcommand.
+"""Handler for the deploy-workflow-version subcommand.
 
 Creates an annotated git tag encoding deployment metadata (git commit ID,
 contexts, patch names, release status, and description). All validation is
@@ -14,8 +14,8 @@ from nf_ica_cli.tag_codec import TagMetadata, encode_tag_message, make_tag_name
 from nf_ica_cli.validators import validate_context, validate_release_status
 
 
-def handle_make_workflow_version(args: dict, config: AppConfig, config_repo: Path) -> None:
-    """Handle the make-workflow-version subcommand.
+def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: Path) -> None:
+    """Handle the deploy-workflow-version subcommand.
 
     Creates an annotated git tag encoding deployment metadata. All validation
     is performed before the tag is created (fail-fast).

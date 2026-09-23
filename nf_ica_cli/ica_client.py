@@ -12,17 +12,11 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
 
 import boto3
+from wrapica.literals import NextflowPipelineVersionType
 from wrapica.project_pipelines import (
-    ProjectPipeline,
     create_nextflow_pipeline_from_zip,
-    list_project_pipelines,
-    add_pipeline_file,
-    delete_pipeline_file,
-    get_project_pipeline_obj,
-    update_pipeline_file,
 )
 
 
@@ -143,7 +137,7 @@ def create_pipeline(
     workflow_name: str,
     version: str,
     source_dir: Path,
-    nextflow_version: str,
+    nextflow_version: NextflowPipelineVersionType,
     description: str,
 ) -> str:
     """Create a new Nextflow pipeline on ICA using wrapica.
@@ -177,6 +171,7 @@ def create_pipeline(
             pipeline_code=pipeline_code,
             zip_path=zip_path,
             workflow_description=description,
+            nextflow_version=nextflow_version,
         )
 
         return pipeline.pipeline.id
@@ -189,103 +184,6 @@ def create_pipeline(
         # Clean up the temporary zip file
         if zip_path.exists():
             zip_path.unlink()
-
-
-def update_existing_pipeline(
-    project_id: str,
-    pipeline_id: str,
-    source_dir: Path,
-    nextflow_version: str,
-    description: str,
-) -> None:
-    """Update an existing pipeline on ICA using wrapica.
-
-    Updates the pipeline by iterating through source files and using
-    wrapica's file management functions (add/update) to synchronize
-    the pipeline content.
-
-    Args:
-        project_id: The ICA project UUID containing the pipeline.
-        pipeline_id: The UUID of the pipeline to update.
-        source_dir: Path to the directory containing the updated Nextflow source.
-        nextflow_version: The Nextflow version to use on ICA.
-        description: Updated description for the pipeline.
-
-    Raises:
-        RuntimeError: If pipeline update fails.
-    """
-    if not source_dir.exists():
-        raise FileNotFoundError(
-            f"Error: [FILE ACCESS] Source directory not found: '{source_dir}'."
-        )
-
-    if not source_dir.is_dir():
-        raise FileNotFoundError(
-            f"Error: [FILE ACCESS] Source path is not a directory: '{source_dir}'."
-        )
-
-    try:
-        # Get the existing pipeline to access its files
-        pipeline_obj = get_project_pipeline_obj(
-            project_id=project_id,
-            pipeline_id=pipeline_id,
-        )
-
-        # Add/update all files from the source directory
-        for file_path in sorted(source_dir.rglob("*")):
-            if file_path.is_file():
-                relative_path = file_path.relative_to(source_dir)
-                add_pipeline_file(
-                    project_id=project_id,
-                    pipeline_id=pipeline_id,
-                    file_path=file_path,
-                    relative_path=relative_path,
-                )
-    except Exception as e:
-        raise RuntimeError(
-            f"Error: [ICA API] Failed to update pipeline '{pipeline_id}' "
-            f"in project '{project_id}': {e}"
-        ) from e
-
-
-def find_existing_pipeline(
-    project_id: str,
-    workflow_name: str,
-    version: str,
-) -> Optional[str]:
-    """Check if a pipeline already exists for this workflow/version in the project.
-
-    Searches the project's pipelines for one matching the naming convention
-    `<workflow_name>__<version>`.
-
-    Args:
-        project_id: The ICA project UUID to search in.
-        workflow_name: The workflow name to match.
-        version: The version tag to match.
-
-    Returns:
-        The pipeline_id (UUID string) if found, None otherwise.
-
-    Raises:
-        RuntimeError: If the API call to list pipelines fails.
-    """
-    expected_code = f"{workflow_name}__{version}"
-
-    try:
-        pipelines: List[ProjectPipeline] = list_project_pipelines(
-            project_id=project_id,
-        )
-
-        for pipeline in pipelines:
-            if pipeline.pipeline.code == expected_code:
-                return pipeline.pipeline.id
-
-        return None
-    except Exception as e:
-        raise RuntimeError(
-            f"Error: [ICA API] Failed to search for existing pipeline "
-            f"'{expected_code}' in project '{project_id}': {e}"
-        ) from e
 
 
 def _zip_source_directory(source_dir: Path) -> Path:

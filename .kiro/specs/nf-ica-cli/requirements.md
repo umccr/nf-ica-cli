@@ -35,7 +35,7 @@ nf-ica-cli is a Python-based CLI toolkit for orchestrating Nextflow pipeline dep
 
 #### Acceptance Criteria
 
-1. THE CLI SHALL expose the command name `nf-ica` with subcommands `add-workflow-version`, `make-workflow-version`, `update-workflow-version-release-status`, `gh-actions-deploy-workflow`, and `register-patch`
+1. THE CLI SHALL expose the command name `nf-ica` with subcommands `add-workflow-version`, `deploy-workflow-version`, `update-workflow-version-release-status`, `gh-actions-deploy-workflow`, and `register-patch`
 2. WHEN invoked, THE CLI SHALL locate the Config_Repo by searching the current working directory and its parent directories up to the filesystem root for a directory containing `config/workflows.yaml`
 3. WHEN the Config_Repo is not found after traversing to the filesystem root, THE CLI SHALL exit with a non-zero return code and an error message stating that no Config_Repo was found and listing the expected directory structure (`config/workflows.yaml`, `config/contexts.yaml`, `config/ica_config.yaml`, `config/ica_pipelines.yaml`, `config/patches.yaml`, `patches/`)
 4. WHEN the Config_Repo is found, THE CLI SHALL parse Workflows_Yaml, Contexts_Yaml, ICA_Config_Yaml, ICA_Pipelines_Yaml, and Patches_Yaml; IF any file contains invalid YAML syntax, THEN THE CLI SHALL exit with a non-zero return code and an error message identifying the file and the parse error location
@@ -57,13 +57,13 @@ nf-ica-cli is a Python-based CLI toolkit for orchestrating Nextflow pipeline dep
 7. THE CLI SHALL validate that `--workflow-version-git-commit-id` is a valid abbreviated or full hexadecimal git commit hash (7-40 characters, characters a-f and 0-9 only); IF validation fails, THEN THE CLI SHALL exit immediately with a non-zero return code and an error message before performing any write operations
 8. THE CLI SHALL write the updated Workflows_Yaml preserving existing YAML formatting and comments
 
-### Requirement 3: Make Workflow Version (Annotated Tag Creation)
+### Requirement 3: Deploy Workflow Version (Annotated Tag Creation)
 
 **User Story:** As a pipeline developer, I want to create an annotated git tag encoding deployment metadata, so that GitHub Actions can use the tag to trigger pipeline deployment to ICA.
 
 #### Acceptance Criteria
 
-1. WHEN the `make-workflow-version` subcommand is invoked with `--workflow-name`, `--workflow-version-tag`, `--workflow-version-git-commit-id`, one or more `--workflow-version-context`, zero or more `--workflow-patch-name`, `--release-status`, and an optional `--workflow-version-description` flags, THE CLI SHALL create an annotated git tag named `<workflow-name>/<workflow-version-tag>__YYYYMMDDHHMMSS` using the current UTC timestamp formatted to second precision
+1. WHEN the `deploy-workflow-version` subcommand is invoked with `--workflow-name`, `--workflow-version-tag`, `--workflow-version-git-commit-id`, one or more `--workflow-version-context`, zero or more `--workflow-patch-name`, `--release-status`, and an optional `--workflow-version-description` flags, THE CLI SHALL create an annotated git tag named `<workflow-name>/<workflow-version-tag>__YYYYMMDDHHMMSS` using the current UTC timestamp formatted to second precision
 2. THE CLI SHALL encode the git commit ID, list of patch names, list of contexts, release status, and workflow version description in the annotated tag message using the YAML schema defined in Requirement 7 (keys: `git_commit_id`, `contexts`, `patch_names`, `release_status`, `workflow_version_description`)
 3. THE CLI SHALL validate all inputs (patch names, release status, workflow version registration, and context values) before creating the annotated tag; IF any validation fails, THEN THE CLI SHALL exit with a non-zero return code without creating the tag
 4. WHEN a `--workflow-patch-name` value does not match a registered patch name in Patches_Yaml, THE CLI SHALL exit with a non-zero return code and an error message identifying the unregistered patch name
@@ -100,7 +100,7 @@ nf-ica-cli is a Python-based CLI toolkit for orchestrating Nextflow pipeline dep
 6. THE CLI SHALL clone the workflow source repository identified by `repo_uri` in Workflows_Yaml for the given `--workflow-name` at the git commit ID extracted from the annotated tag message into a temporary directory, and remove the temporary directory after deployment completes or fails
 7. THE CLI SHALL resolve each patch name from the annotated tag message to its file path using Patches_Yaml and apply each Patch_File to the cloned source in the order specified in the annotated tag message
 8. IF a Patch_File fails to apply cleanly, THEN THE CLI SHALL exit with a non-zero return code and an error message identifying the failing patch name and the conflict details
-9. IF a matching entry for the workflow name, workflow version, and ICA_Project already exists in ICA_Pipelines_Yaml, THEN THE CLI SHALL update the existing pipeline on ICA using the ICA API with the patched source, specifying the Nextflow version from ICA_Config_Yaml `default_nextflow_version`; otherwise THE CLI SHALL create a new pipeline
+9. THE CLI SHALL always create a new pipeline on ICA using the ICA API with the patched source, specifying the Nextflow version from ICA_Config_Yaml `default_nextflow_version`; iterative development on draft pipelines is performed directly via the `icav2` CLI outside of this tool
 10. WHEN deployment to an ICA_Project succeeds, THE CLI SHALL record the pipeline ID in ICA_Pipelines_Yaml with the workflow name, version, git commit ID, tenant, contexts, patch names, release status, and ICA Nextflow version
 11. THE CLI SHALL write the updated ICA_Pipelines_Yaml preserving existing YAML formatting and comments
 12. IF one or more ICA_Projects were skipped due to OIDC_Authentication failure and at least one deployment succeeded, THEN THE CLI SHALL exit with a non-zero return code and a summary message listing the skipped projects alongside the successfully deployed projects
@@ -131,7 +131,7 @@ nf-ica-cli is a Python-based CLI toolkit for orchestrating Nextflow pipeline dep
 2. WHEN the `gh-actions-deploy-workflow` subcommand parses an annotated tag message, THE CLI SHALL deserialize the YAML document and validate that all five keys defined in criterion 1 are present with the correct types
 3. IF an annotated tag message is missing a required key, contains an unknown key, or contains a value that does not match the expected type, THEN THE CLI SHALL exit with a non-zero return code and an error message identifying the key and the nature of the violation
 4. THE CLI SHALL guarantee that serializing valid tag metadata and then parsing the resulting YAML document produces a metadata object with identical field values for all five keys
-5. WHEN the `make-workflow-version` subcommand is invoked with no `--workflow-patch-name` flags, THE CLI SHALL serialize the `patch_names` key as an empty list in the annotated tag message
+5. WHEN the `deploy-workflow-version` subcommand is invoked with no `--workflow-patch-name` flags, THE CLI SHALL serialize the `patch_names` key as an empty list in the annotated tag message
 
 ### Requirement 8: Register Patch
 

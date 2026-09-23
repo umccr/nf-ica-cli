@@ -7,7 +7,7 @@ nf-ica-cli is a Python CLI toolkit that orchestrates Nextflow pipeline deploymen
 The CLI exposes the command `nf-ica` with five subcommands:
 - `register-patch` — Register a patch file by content hash for reuse across pipelines
 - `add-workflow-version` — Register a new workflow version in workflows.yaml
-- `make-workflow-version` — Create an annotated git tag encoding deployment metadata
+- `deploy-workflow-version` — Create an annotated git tag encoding deployment metadata
 - `update-workflow-version-release-status` — Transition a pipeline's release status
 - `gh-actions-deploy-workflow` — Deploy a workflow version to ICA projects (GitHub Actions context)
 
@@ -21,7 +21,7 @@ graph TD
         CLI[CLI Entry Point<br/>docopt: nf-ica]
         RP[register-patch]
         AW[add-workflow-version]
-        MW[make-workflow-version]
+        MW[deploy-workflow-version]
         UR[update-workflow-version-release-status]
         GH[gh-actions-deploy-workflow]
         
@@ -103,7 +103,7 @@ Usage:
     nf-ica add-workflow-version --workflow-name=<name> --workflow-repo-uri=<uri>
             --workflow-version-tag=<tag> --workflow-version-git-commit-id=<id>
             --workflow-version-context=<ctx>... --workflow-ica-nextflow-version=<ver>
-    nf-ica make-workflow-version --workflow-name=<name> --workflow-version-tag=<tag>
+    nf-ica deploy-workflow-version --workflow-name=<name> --workflow-version-tag=<tag>
             --workflow-version-git-commit-id=<id> --workflow-version-context=<ctx>...
             [--workflow-patch-name=<patch>...] --release-status=<status>
             [--workflow-version-description=<desc>]
@@ -132,8 +132,8 @@ def main() -> None:
         handle_register_patch(args, config, config_repo)
     elif args["add-workflow-version"]:
         handle_add_workflow_version(args, config, config_repo)
-    elif args["make-workflow-version"]:
-        handle_make_workflow_version(args, config, config_repo)
+    elif args["deploy-workflow-version"]:
+        handle_deploy_workflow_version(args, config, config_repo)
     elif args["update-workflow-version-release-status"]:
         handle_update_release_status(args, config, config_repo)
     elif args["gh-actions-deploy-workflow"]:
@@ -390,29 +390,6 @@ def create_pipeline(
     
     Zips the source directory and uploads via wrapica's pipeline creation API.
     Returns the pipeline_id.
-    """
-    ...
-
-
-def update_existing_pipeline(
-    project_id: str,
-    pipeline_id: str,
-    source_dir: Path,
-    nextflow_version: str,
-    description: str,
-) -> None:
-    """Update an existing pipeline on ICA using wrapica."""
-    ...
-
-
-def find_existing_pipeline(
-    project_id: str,
-    workflow_name: str,
-    version: str,
-) -> Optional[str]:
-    """Check if a pipeline already exists for this workflow/version in the project.
-    
-    Returns pipeline_id if found, None otherwise.
     """
     ...
 ```
@@ -758,7 +735,7 @@ Integration tests verify end-to-end behavior with real file I/O and git operatio
 
 - **register-patch workflow**: Create temp files, register, verify patches.yaml and file in patches/
 - **add-workflow-version workflow**: Start with sample config repo, add version, verify YAML
-- **make-workflow-version workflow**: Create tag, read it back, verify message content
+- **deploy-workflow-version workflow**: Create tag, read it back, verify message content
 - **gh-actions-deploy-workflow**: Mock ICA API, verify full deployment flow
 - **update-workflow-version-release-status**: Verify status transitions in YAML
 
@@ -785,7 +762,7 @@ tests/
 └── integration/
     ├── test_register_patch_e2e.py
     ├── test_add_workflow_version_e2e.py
-    ├── test_make_workflow_version_e2e.py
+    ├── test_deploy_workflow_version_e2e.py
     ├── test_update_status_e2e.py
     └── test_deploy_workflow_e2e.py
 ```

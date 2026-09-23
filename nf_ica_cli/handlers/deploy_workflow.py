@@ -18,8 +18,6 @@ from nf_ica_cli.git_ops import clone_at_commit, get_tag_message
 from nf_ica_cli.ica_client import (
     authenticate_oidc,
     create_pipeline,
-    find_existing_pipeline,
-    update_existing_pipeline,
 )
 from nf_ica_cli.patches import apply_patches
 from nf_ica_cli.release_page import (
@@ -81,9 +79,8 @@ def handle_deploy_workflow(
     9. For each target project:
        a. Authenticate OIDC (Req 5.4)
        b. If auth fails: log, record skip, continue (Req 5.5)
-       c. Find existing pipeline via find_existing_pipeline (Req 5.9)
-       d. If exists: update_existing_pipeline; if not: create_pipeline
-       e. Record DeploymentResult
+       c. Create a new pipeline on ICA (Req 5.9)
+       d. Record DeploymentResult
     10. Record pipeline IDs in ica_pipelines.yaml (Req 5.10, 5.11)
     11. If at least one deployment succeeded:
         a. Create zip of patched source (Req 5.13)
@@ -251,45 +248,23 @@ def _deploy_to_targets(
             skipped_projects.append(project.name)
             continue
 
-        # 9c. Find existing pipeline (Req 5.9)
-        try:
-            existing_pipeline_id = find_existing_pipeline(
-                project_id=project.id,
-                workflow_name=workflow_name,
-                version=workflow_version,
-            )
-        except RuntimeError as e:
-            logger.warning(
-                f"Failed to check existing pipeline in project '{project.name}': {e}"
-            )
-            skipped_projects.append(project.name)
-            continue
-
-        # 9d. Create or update pipeline
+        # 9c. Create pipeline (Req 5.9)
+        # Deployments always create a new pipeline. Iterative development
+        # on draft pipelines is done directly via the icav2 CLI (see nf-ica README).
         try:
             description = (
                 tag_metadata.workflow_version_description
                 or f"{workflow_name} v{workflow_version}"
             )
 
-            if existing_pipeline_id:
-                update_existing_pipeline(
-                    project_id=project.id,
-                    pipeline_id=existing_pipeline_id,
-                    source_dir=clone_dir,
-                    nextflow_version=nextflow_version,
-                    description=description,
-                )
-                pipeline_id = existing_pipeline_id
-            else:
-                pipeline_id = create_pipeline(
-                    project_id=project.id,
-                    workflow_name=workflow_name,
-                    version=workflow_version,
-                    source_dir=clone_dir,
-                    nextflow_version=nextflow_version,
-                    description=description,
-                )
+            pipeline_id = create_pipeline(
+                project_id=project.id,
+                workflow_name=workflow_name,
+                version=workflow_version,
+                source_dir=clone_dir,
+                nextflow_version=nextflow_version,
+                description=description,
+            )
         except RuntimeError as e:
             logger.warning(
                 f"Pipeline deployment failed for project '{project.name}' "

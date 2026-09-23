@@ -136,7 +136,7 @@ Once the workflow version is registered and patches are in place, create an anno
 that encodes the deployment metadata. This tag is what GitHub Actions reads during deployment.
 
 ```bash
-nf-ica make-workflow-version \
+nf-ica deploy-workflow-version \
   --workflow-name oncoanalyser \
   --workflow-version-tag 2.4.0 \
   --workflow-version-git-commit-id abc1234def5678 \

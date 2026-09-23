@@ -174,7 +174,7 @@ def ensure_on_up_to_date_main(repo_dir: Path) -> None:
     current_branch = result.stdout.strip()
     if current_branch != "main":
         raise RuntimeError(
-            f"Current branch is '{current_branch}', but 'make-workflow-version' "
+            f"Current branch is '{current_branch}', but 'deploy-workflow-version' "
             f"can only be run on the 'main' branch."
         )
 

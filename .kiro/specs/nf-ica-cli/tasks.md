@@ -77,8 +77,6 @@ Implement a Python CLI toolkit (`nf-ica`) for orchestrating Nextflow pipeline de
   - [x] 3.2 Implement ICA client (`nf_ica_cli/ica_client.py`)
     - Implement `authenticate_oidc(aws_role_arn, secret_arn) -> str` — assume AWS role via OIDC, retrieve JWT from Secrets Manager, set wrapica session
     - Implement `create_pipeline(project_id, workflow_name, version, source_dir, nextflow_version, description) -> str` — zip source and create via wrapica
-    - Implement `update_existing_pipeline(project_id, pipeline_id, source_dir, nextflow_version, description) -> None` — update via wrapica
-    - Implement `find_existing_pipeline(project_id, workflow_name, version) -> Optional[str]` — check if pipeline exists
     - Define `DeploymentTarget` dataclass
     - _Requirements: 5.4, 5.9_
 
@@ -135,7 +133,7 @@ Implement a Python CLI toolkit (`nf-ica`) for orchestrating Nextflow pipeline de
     - Write updated Workflows_Yaml preserving comments
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
 
-  - [x] 6.3 Implement `make-workflow-version` handler
+  - [x] 6.3 Implement `deploy-workflow-version` handler
     - Extract all flags from docopt args
     - Validate release status, patch names against registry, context values, version registration
     - Generate tag name with UTC timestamp
@@ -163,7 +161,7 @@ Implement a Python CLI toolkit (`nf-ica`) for orchestrating Nextflow pipeline de
     - Extract `--workflow-name`, `--workflow-version`, `--annotated-tag-name`
     - Retrieve and decode annotated tag message via git_ops and tag codec
     - Identify target projects via context-based filtering on ICA_Config_Yaml
-    - For each target project: authenticate OIDC, clone repo at commit, apply patches, create or update pipeline
+    - For each target project: authenticate OIDC, clone repo at commit, apply patches, create new pipeline
     - Record pipeline IDs in ICA_Pipelines_Yaml
     - After successful deployments: zip patched pipeline source, generate release body with snakemd (deployment table, patches, metadata), create GitHub Release with `gh` CLI attaching the zip artefact
     - Skip GitHub Release creation if all deployments failed

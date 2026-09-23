@@ -8,9 +8,10 @@ Usage:
 Commands:
     register-patch                          Register a patch file for use in deployments
     add-workflow-version                    Add a new workflow version to workflows.yaml
-    make-workflow-version                   Create an annotated git tag for deployment
+    deploy-workflow-version                 Create an annotated git tag for deployment
     update-workflow-version-release-status  Update release status of a pipeline entry
     gh-actions-deploy-workflow              Deploy a workflow version to ICA projects
+    collect-all-patches                     Collect patches from an ICA pipeline by diffing against source
 
 Options:
     -h --help     Show this help message
@@ -56,10 +57,10 @@ Options:
     --workflow-ica-nextflow-version=<ver>    ICA Nextflow engine version to use
     -h --help                                Show this help message
 """,
-    "make-workflow-version": """Create an annotated git tag encoding deployment metadata.
+    "deploy-workflow-version": """Create an annotated git tag encoding deployment metadata.
 
 Usage:
-    nf-ica make-workflow-version
+    nf-ica deploy-workflow-version
         (--workflow-name=<name>)
         (--workflow-version-tag=<tag>)
         (--workflow-version-git-commit-id=<id>)
@@ -105,6 +106,22 @@ Options:
     --workflow-version=<ver>       Workflow version to deploy
     --annotated-tag-name=<tag>    Name of the annotated git tag with metadata
     -h --help                      Show this help message
+""",
+    "collect-all-patches": """Collect patches from an ICA pipeline by diffing against source.
+
+Usage:
+    nf-ica collect-all-patches
+        (--repo-uri=<uri>)
+        (--commit-id=<id>)
+        (--project-id=<pid>)
+        (--pipeline-id=<plid>)
+
+Options:
+    --repo-uri=<uri>       Git repository URI for the original workflow source
+    --commit-id=<id>       Git commit SHA to compare against
+    --project-id=<pid>     ICA project UUID containing the pipeline
+    --pipeline-id=<plid>   ICA pipeline UUID to export source from
+    -h --help              Show this help message
 """,
 }
 
@@ -163,12 +180,12 @@ def main() -> None:
             )
 
             handle_add_workflow_version(args, config, config_repo)
-        elif command == "make-workflow-version":
-            from nf_ica_cli.handlers.make_workflow_version import (
-                handle_make_workflow_version,
+        elif command == "deploy-workflow-version":
+            from nf_ica_cli.handlers.deploy_workflow_version import (
+                handle_deploy_workflow_version,
             )
 
-            handle_make_workflow_version(args, config, config_repo)
+            handle_deploy_workflow_version(args, config, config_repo)
         elif command == "update-workflow-version-release-status":
             from nf_ica_cli.handlers.update_release_status import (
                 handle_update_release_status,
@@ -179,6 +196,12 @@ def main() -> None:
             from nf_ica_cli.handlers.deploy_workflow import handle_deploy_workflow
 
             handle_deploy_workflow(args, config, config_repo)
+        elif command == "collect-all-patches":
+            from nf_ica_cli.handlers.collect_all_patches import (
+                handle_collect_all_patches,
+            )
+
+            handle_collect_all_patches(args, config, config_repo)
 
     except SystemExit as e:
         # SystemExit from docopt (--help, --version) or our own validation

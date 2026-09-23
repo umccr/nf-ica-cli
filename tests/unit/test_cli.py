@@ -7,15 +7,29 @@ avoiding the need for a config repo or any external dependencies.
 import pytest
 from docopt import docopt, DocoptExit
 
-from nf_ica_cli.cli import __doc__ as cli_doc
+from nf_ica_cli.cli import __doc__ as cli_doc, _SUBCMD_USAGE
 
 
 # --- Helper ---
 
 
+def parse_top_level(argv: list[str]) -> dict:
+    """Parse argv using the top-level CLI docstring (options_first=True)."""
+    return docopt(cli_doc, argv=argv, version="nf-ica-cli 0.1.0", options_first=True)
+
+
 def parse_args(argv: list[str]) -> dict:
-    """Parse argv using the CLI docstring via docopt."""
-    return docopt(cli_doc, argv=argv, version="nf-ica-cli 0.1.0")
+    """Parse argv using the two-pass approach matching the real CLI.
+
+    First pass identifies the command, second pass parses its options.
+    """
+    top_args = docopt(cli_doc, argv=argv, version="nf-ica-cli 0.1.0", options_first=True)
+    command = top_args["<command>"]
+    if command not in _SUBCMD_USAGE:
+        raise SystemExit(f"Error: Unknown command '{command}'.")
+    sub_argv = [command] + top_args["<args>"]
+    args = docopt(_SUBCMD_USAGE[command], argv=sub_argv)
+    return args
 
 
 # --- Test valid argument combinations for each subcommand ---
@@ -107,18 +121,18 @@ class TestAddWorkflowVersion:
 
 
 class TestMakeWorkflowVersion:
-    """Test make-workflow-version subcommand argument parsing."""
+    """Test deploy-workflow-version subcommand argument parsing."""
 
     def test_all_required_flags(self):
         args = parse_args([
-            "make-workflow-version",
+            "deploy-workflow-version",
             "--workflow-name=oncoanalyser",
             "--workflow-version-tag=2.2.0",
             "--workflow-version-git-commit-id=abc1234",
             "--workflow-version-context=production",
             "--release-status=DRAFT",
         ])
-        assert args["make-workflow-version"] is True
+        assert args["deploy-workflow-version"] is True
         assert args["--workflow-name"] == "oncoanalyser"
         assert args["--workflow-version-tag"] == "2.2.0"
         assert args["--workflow-version-git-commit-id"] == "abc1234"
@@ -129,7 +143,7 @@ class TestMakeWorkflowVersion:
 
     def test_with_optional_patch_name(self):
         args = parse_args([
-            "make-workflow-version",
+            "deploy-workflow-version",
             "--workflow-name=oncoanalyser",
             "--workflow-version-tag=2.2.0",
             "--workflow-version-git-commit-id=abc1234",
@@ -141,7 +155,7 @@ class TestMakeWorkflowVersion:
 
     def test_with_multiple_patch_names(self):
         args = parse_args([
-            "make-workflow-version",
+            "deploy-workflow-version",
             "--workflow-name=oncoanalyser",
             "--workflow-version-tag=2.2.0",
             "--workflow-version-git-commit-id=abc1234",
@@ -154,7 +168,7 @@ class TestMakeWorkflowVersion:
 
     def test_with_optional_description(self):
         args = parse_args([
-            "make-workflow-version",
+            "deploy-workflow-version",
             "--workflow-name=oncoanalyser",
             "--workflow-version-tag=2.2.0",
             "--workflow-version-git-commit-id=abc1234",
@@ -166,7 +180,7 @@ class TestMakeWorkflowVersion:
 
     def test_with_multiple_contexts(self):
         args = parse_args([
-            "make-workflow-version",
+            "deploy-workflow-version",
             "--workflow-name=oncoanalyser",
             "--workflow-version-tag=2.2.0",
             "--workflow-version-git-commit-id=abc1234",
@@ -179,7 +193,7 @@ class TestMakeWorkflowVersion:
     def test_missing_release_status(self):
         with pytest.raises(SystemExit):
             parse_args([
-                "make-workflow-version",
+                "deploy-workflow-version",
                 "--workflow-name=oncoanalyser",
                 "--workflow-version-tag=2.2.0",
                 "--workflow-version-git-commit-id=abc1234",
@@ -289,9 +303,13 @@ class TestNoSubcommand:
 
 
 class TestSubcommandExclusivity:
-    """Verify only one subcommand is active at a time."""
+    """Verify only one subcommand is active at a time.
 
-    def test_register_patch_disables_others(self):
+    With two-pass docopt parsing, each subcommand's args dict only contains
+    the active command's boolean key. We verify the correct command is True.
+    """
+
+    def test_register_patch_is_active(self):
         args = parse_args([
             "register-patch",
             "--file=/tmp/f.txt",
@@ -299,12 +317,10 @@ class TestSubcommandExclusivity:
             "--description=d",
         ])
         assert args["register-patch"] is True
-        assert args["add-workflow-version"] is False
-        assert args["make-workflow-version"] is False
-        assert args["update-workflow-version-release-status"] is False
-        assert args["gh-actions-deploy-workflow"] is False
+        assert "add-workflow-version" not in args
+        assert "deploy-workflow-version" not in args
 
-    def test_add_workflow_version_disables_others(self):
+    def test_add_workflow_version_is_active(self):
         args = parse_args([
             "add-workflow-version",
             "--workflow-name=wf",
@@ -315,7 +331,5 @@ class TestSubcommandExclusivity:
             "--workflow-ica-nextflow-version=24.04.4",
         ])
         assert args["add-workflow-version"] is True
-        assert args["register-patch"] is False
-        assert args["make-workflow-version"] is False
-        assert args["update-workflow-version-release-status"] is False
-        assert args["gh-actions-deploy-workflow"] is False
+        assert "register-patch" not in args
+        assert "deploy-workflow-version" not in args
