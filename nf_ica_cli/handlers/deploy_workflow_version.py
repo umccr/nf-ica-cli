@@ -11,7 +11,11 @@ from typing import List
 from nf_ica_cli.config import AppConfig
 from nf_ica_cli.git_ops import create_annotated_tag, ensure_on_up_to_date_main, tag_exists
 from nf_ica_cli.tag_codec import TagMetadata, encode_tag_message, make_tag_name
-from nf_ica_cli.validators import validate_context, validate_release_status
+from nf_ica_cli.validators import (
+    validate_context,
+    validate_git_commit_id,
+    validate_release_status,
+)
 
 
 def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: Path) -> None:
@@ -23,14 +27,15 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
     Flow:
     1. Extract flags from docopt args
     2. Validate release status
-    3. Validate each context value against defined contexts
-    4. Verify version tag is registered in workflows.yaml for the workflow
-    5. Verify each patch name exists in the patches registry
-    6. Ensure we're on an up-to-date main branch
-    7. Generate tag name with UTC timestamp
-    8. Check tag doesn't already exist
-    9. Encode tag metadata as YAML
-    10. Create annotated tag
+    3. Validate the git commit ID
+    4. Validate each context value against defined contexts
+    5. Verify version tag is registered in workflows.yaml for the workflow
+    6. Verify each patch name exists in the patches registry
+    7. Ensure we're on an up-to-date main branch
+    8. Generate tag name with UTC timestamp
+    9. Check tag doesn't already exist
+    10. Encode tag metadata as YAML
+    11. Create annotated tag
 
     Args:
         args: Parsed docopt arguments dict.
@@ -57,7 +62,16 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
             f"Error: [VALIDATION] {e}"
         ) from e
 
-    # 3. Validate each context value (Req 3.7)
+    # 3. Validate the git commit ID (fail-fast so an invalid commit is rejected
+    #    at tag-creation time rather than later during deployment/checkout)
+    try:
+        validate_git_commit_id(git_commit_id)
+    except ValueError as e:
+        raise SystemExit(
+            f"Error: [VALIDATION] {e}"
+        ) from e
+
+    # 4. Validate each context value (Req 3.7)
     defined_context_names = [ctx.name for ctx in config.contexts]
     for ctx_value in contexts:
         try:
@@ -67,7 +81,7 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
                 f"Error: [VALIDATION] {e}"
             ) from e
 
-    # 4. Verify version tag is registered in workflows.yaml (Req 3.6)
+    # 5. Verify version tag is registered in workflows.yaml (Req 3.6)
     workflow_found = False
     version_registered = False
     for wf in config.workflows:
@@ -92,7 +106,7 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
             f"Use 'add-workflow-version' to register the version first."
         )
 
-    # 5. Verify each patch name exists in patches registry (Req 3.4)
+    # 6. Verify each patch name exists in patches registry (Req 3.4)
     registered_patch_names = {patch.name for patch in config.patches}
     for patch_name in patch_names:
         if patch_name not in registered_patch_names:
@@ -102,7 +116,7 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
                 f"{', '.join(sorted(registered_patch_names)) if registered_patch_names else '(none)'}."
             )
 
-    # 6. Ensure we're on an up-to-date main branch
+    # 7. Ensure we're on an up-to-date main branch
     try:
         ensure_on_up_to_date_main(config_repo)
     except RuntimeError as e:
@@ -110,17 +124,17 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
             f"Error: [GIT] {e}"
         ) from e
 
-    # 7. Generate tag name with UTC timestamp (Req 3.1)
+    # 8. Generate tag name with UTC timestamp (Req 3.1)
     tag_name = make_tag_name(workflow_name, version_tag)
 
-    # 8. Check tag doesn't already exist (Req 3.8)
+    # 9. Check tag doesn't already exist (Req 3.8)
     if tag_exists(config_repo, tag_name):
         raise SystemExit(
             f"Error: [GIT] Tag '{tag_name}' already exists in the repository. "
             f"Cannot create a duplicate tag."
         )
 
-    # 9. Encode tag metadata as YAML (Req 3.2)
+    # 10. Encode tag metadata as YAML (Req 3.2)
     metadata = TagMetadata(
         git_commit_id=git_commit_id,
         contexts=contexts,
@@ -130,7 +144,7 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
     )
     tag_message = encode_tag_message(metadata)
 
-    # 10. Create annotated tag (Req 3.1)
+    # 11. Create annotated tag (Req 3.1)
     try:
         create_annotated_tag(config_repo, tag_name, tag_message)
     except RuntimeError as e:

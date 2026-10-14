@@ -46,7 +46,7 @@ Usage:
         (--workflow-version-tag=<tag>)
         (--workflow-version-git-commit-id=<id>)
         (--workflow-version-context=<ctx>...)
-        (--workflow-ica-nextflow-version=<ver>)
+        [--workflow-ica-nextflow-version=<ver>]
 
 Options:
     --workflow-name=<name>                   Name of the workflow
@@ -54,7 +54,7 @@ Options:
     --workflow-version-tag=<tag>             Version tag (e.g. 1.0.0)
     --workflow-version-git-commit-id=<id>    Full git commit SHA for this version
     --workflow-version-context=<ctx>         Deployment context(s) (repeatable)
-    --workflow-ica-nextflow-version=<ver>    ICA Nextflow engine version to use
+    --workflow-ica-nextflow-version=<ver>    ICA Nextflow engine version to use (optional)
     -h --help                                Show this help message
 """,
     "deploy-workflow-version": """Create an annotated git tag encoding deployment metadata.

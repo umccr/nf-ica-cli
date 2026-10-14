@@ -225,7 +225,8 @@ class TestCreatePipeline:
         mock_create.assert_called_once()
         call_kwargs = mock_create.call_args[1]
         assert call_kwargs["project_id"] == "project-123"
-        assert call_kwargs["pipeline_code"] == "oncoanalyser__2.2.0"
+        assert call_kwargs["pipeline_name"] == "oncoanalyser"
+        assert call_kwargs["pipeline_version"] == "2.2.0"
         assert call_kwargs["workflow_description"] == "Oncoanalyser v2.2.0"
         # Verify zip_path was passed (a Path object)
         assert "zip_path" in call_kwargs

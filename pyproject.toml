@@ -12,7 +12,7 @@ license = "MIT"
 dependencies = [
     "docopt>=0.6.2",
     "ruamel.yaml>=0.18.0",
-    "wrapica==2.48.1",
+    "wrapica >= 2.49.0",
     "boto3>=1.28.0",
     "snakemd>=2.0.0",
     "boto3-stubs~=1.43.49",

@@ -163,12 +163,11 @@ def create_pipeline(
     zip_path = _zip_source_directory(source_dir)
 
     try:
-        pipeline_code = f"{workflow_name}__{version}"
-
         # Create the pipeline via wrapica
         pipeline = create_nextflow_pipeline_from_zip(
             project_id=project_id,
-            pipeline_code=pipeline_code,
+            pipeline_name=workflow_name,
+            pipeline_version=version,
             zip_path=zip_path,
             workflow_description=description,
             nextflow_version=nextflow_version,
@@ -181,9 +180,10 @@ def create_pipeline(
             f"'{workflow_name}' v{version} in project '{project_id}': {e}"
         ) from e
     finally:
-        # Clean up the temporary zip file
-        if zip_path.exists():
-            zip_path.unlink()
+        # Clean up the temporary directory holding the zip archive.
+        # _zip_source_directory() creates the zip inside a dedicated temp dir,
+        # so removing the parent directory cleans up both the zip and the dir.
+        shutil.rmtree(zip_path.parent, ignore_errors=True)
 
 
 def _zip_source_directory(source_dir: Path) -> Path:
