@@ -1,0 +1,11 @@
+.git
+.github
+.hypothesis
+.pytest_cache
+.kiro
+tests
+__pycache__
+*.pyc
+*.egg-info
+dist
+build
