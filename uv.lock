@@ -304,7 +304,7 @@ wheels = [
 
 [[package]]
 name = "libica"
-version = "3.2"
+version = "3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
@@ -312,9 +312,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/6e/136d1ae3436872f30bb711f25fbedb72ecee6d4ac0301aae19efb04bc4bb/libica-3.2.tar.gz", hash = "sha256:51b2ef2f7d40d86ee9100cc5417ff6dbd22de80af7ca6e2d62c1f02b3eb39c5b", size = 630387, upload-time = "2025-11-03T06:43:26.505Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7e/a9/d10a43d0e87bd8f37e03052c581077d933a4172bdbab564f564dac98f46c/libica-3.3.tar.gz", hash = "sha256:37129bbb42fcecaef9eb02be684c5a471b3ed4cfc6cbf9495b96542b30db77d5", size = 667288, upload-time = "2026-10-12T09:31:08.15Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/cd/8bdafec76a7c60bd224e4036aee707e1d502601618b4344310a79e420fe7/libica-3.2-py3-none-any.whl", hash = "sha256:7a3f20085fc553e6aa36ddafea0d239611614b334c1de34d1e48d62427afd2ee", size = 2887059, upload-time = "2025-11-03T06:43:29.953Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/fb/2673cbb4ffb3fb7d4c0cece03b2d228aa1866427ce5c9b9430c3ecc9751a/libica-3.3-py3-none-any.whl", hash = "sha256:5fd3304e0741b4b4ce2675c7093f7e349c54aa53edf8dbcc7fa524d691fbf26b", size = 3031020, upload-time = "2026-10-12T09:31:13.532Z" },
 ]
 
 [[package]]
@@ -418,7 +418,7 @@ requires-dist = [
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.0.0" },
     { name = "ruamel-yaml", specifier = ">=0.18.0" },
     { name = "snakemd", specifier = ">=2.0.0" },
-    { name = "wrapica", specifier = "==2.48.1" },
+    { name = "wrapica", specifier = ">=2.49.1" },
 ]
 provides-extras = ["dev"]
 
@@ -896,7 +896,7 @@ wheels = [
 
 [[package]]
 name = "wrapica"
-version = "2.48.1"
+version = "2.49.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -912,7 +912,7 @@ dependencies = [
     { name = "verboselogs" },
     { name = "websocket-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ba/35/d2c54f5a08e04cbbef9b6eaaba66419eea25546afdd3f3c50f0bcabf3f6b/wrapica-2.48.1.tar.gz", hash = "sha256:f983ebfdb7dda20abcad82a0290a3acf28f458d551ad058c6c2cb7cd10b4b094", size = 129267, upload-time = "2026-09-04T05:49:06.97Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/22/7168655554fccf5a6df504f8336d4e8bfdead653384503ab641ee46f4014/wrapica-2.49.1.tar.gz", hash = "sha256:6928cd9a7bc91d44bd3a867f525cfc14c4bb0321108260c97a0f6bba5f390b45", size = 137383, upload-time = "2026-10-22T06:21:39.625Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/36/3d97229c15f0368b9a5bc7b0b0e3c9bf6f411af8090f5f976ac6ab8438b7/wrapica-2.48.1-py3-none-any.whl", hash = "sha256:79c38aa7bbd6b0e24e9479c6c6680da0a95fb3891689ccc0467fcf0e6a292702", size = 125650, upload-time = "2026-09-04T05:49:05.771Z" },
+    { url = "https://files.pythonhosted.org/packages/68/b3/58551cabf711dd73dfe17112daf4ead4cc2dec14b4110ae2ce95f3f8ef21/wrapica-2.49.1-py3-none-any.whl", hash = "sha256:52ed789a625d9bc34f63975f66205995f84f0bc3f62956d998e63cbe9fd612bb", size = 130459, upload-time = "2026-10-22T06:21:38.379Z" },
 ]
