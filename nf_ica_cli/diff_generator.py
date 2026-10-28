@@ -8,6 +8,7 @@ Diffs are generated with ``git diff --no-index`` so that the output matches
 the existing nf-ica patch application infrastructure.
 """
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,13 @@ from typing import List, Optional
 
 # Directory name that must be excluded from diff comparison.
 _GIT_DIR_NAME = ".git"
+
+# Matches the volatile git ``index`` header line, e.g.
+# ``index 00000000..3edfd5f0`` (new/deleted file) or
+# ``index 422c2b7..0f7bc76 100644`` (modified file, trailing octal mode).
+# Anchored at column 0 so hunk-body lines beginning with the word "index"
+# (always prefixed by ``+``/``-``/space in a unified diff) can never match.
+_GIT_INDEX_LINE_RE = re.compile(r"^index [0-9a-f]+\.\.[0-9a-f]+( [0-7]+)?$")
 
 
 @dataclass
@@ -95,6 +103,13 @@ def _normalize_diff_header(
     matching the existing nf-ica patch format and keeping the output compatible
     with ``git apply``. ``/dev/null`` markers for new/deleted files are preserved.
 
+    The volatile git ``index <hash>..<hash>[ <mode>]`` line is also stripped
+    from the normalized output entirely, for stable content-addressing: the
+    blob hashes git emits vary between otherwise-identical patches (and even in
+    hex width), so dropping the line lets identical logical patches produce
+    identical normalized text and therefore identical MD5s. ``git apply`` does
+    not require the ``index`` line, so removing it is safe for the round-trip.
+
     Args:
         diff_text: Raw unified diff produced by ``git diff --no-index``.
         relative_path: File path relative to the directory roots.
@@ -113,6 +128,10 @@ def _normalize_diff_header(
             normalized_lines.append(
                 f"diff --git a/{relative_path} b/{relative_path}"
             )
+        elif _GIT_INDEX_LINE_RE.match(line):
+            # Drop the volatile ``index <hash>..<hash>[ <mode>]`` line so
+            # identical logical patches content-address stably.
+            continue
         elif line.startswith("--- "):
             normalized_lines.append(f"--- {a_ref}")
         elif line.startswith("+++ "):
