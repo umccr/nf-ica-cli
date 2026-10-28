@@ -224,4 +224,32 @@ def get_tag_message(repo_dir: Path, tag_name: str) -> str:
         cwd=repo_dir,
         error_context=f"Failed to retrieve message for tag '{tag_name}'",
     )
-    return result.stdout.strip()
+    return _strip_pgp_signature(result.stdout).strip()
+
+
+def _strip_pgp_signature(message: str) -> str:
+    """Remove a trailing PGP signature block from a tag message.
+
+    Annotated tags created with signing (``git tag -s`` or
+    ``tag.gpgsign=true``) carry a PGP signature that ``%(contents)`` appends
+    after the message body. The signature is not part of the YAML payload and
+    must be stripped before the message is parsed.
+
+    Only a signature block at the end of the message is removed; the body that
+    precedes it is returned unchanged.
+
+    Parameters
+    ----------
+    message : str
+        The raw tag message, possibly ending with a PGP signature block.
+
+    Returns
+    -------
+    str
+        The message body with any trailing PGP signature block removed.
+    """
+    marker = "-----BEGIN PGP SIGNATURE-----"
+    idx = message.find(marker)
+    if idx == -1:
+        return message
+    return message[:idx]

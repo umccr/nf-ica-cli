@@ -25,6 +25,47 @@ _GIT_DIR_NAME = ".git"
 _GIT_INDEX_LINE_RE = re.compile(r"^index [0-9a-f]+\.\.[0-9a-f]+( [0-7]+)?$")
 
 
+def _is_uploaded_by_wrapica(path: Path, root: Path) -> bool:
+    """Return True if wrapica would upload ``path`` when building the pipeline.
+
+    Mirrors the prefilter applied by
+    ``wrapica.project_pipelines.create_nextflow_pipeline_from_zip`` when it
+    collects the files to attach to an ICA pipeline. wrapica skips:
+
+    * files whose top-level path component (relative to the pipeline root)
+      starts with ``.`` (e.g. ``.github/...``, ``.gitignore``,
+      ``.gitattributes``), and
+    * empty files (zero bytes).
+
+    These files are therefore never present in the exported ICA pipeline
+    source, so including them on the source side only produces spurious
+    "delete" diffs. Excluding them here keeps the source file set aligned with
+    what wrapica actually uploaded.
+
+    Note: wrapica does *not* exclude test directories (``tests/``, ``test/``)
+    or hidden files nested below the top level, so those are intentionally
+    left in place here to match wrapica's behaviour.
+
+    Args:
+        path: The file being considered (must be a regular file).
+        root: The directory root the path is relative to.
+
+    Returns:
+        True if wrapica would have uploaded the file, False otherwise.
+    """
+    relative = path.relative_to(root)
+
+    # Skip files whose top-level directory/name starts with a dot.
+    if relative.parts and relative.parts[0].startswith("."):
+        return False
+
+    # Skip empty files.
+    if path.stat().st_size == 0:
+        return False
+
+    return True
+
+
 @dataclass
 class FileDiff:
     """Represents a unified diff for a single file.
@@ -42,13 +83,20 @@ class FileDiff:
     is_deleted: bool
 
 
-def _collect_relative_files(root: Path) -> List[str]:
+def _collect_relative_files(root: Path, apply_wrapica_filter: bool = False) -> List[str]:
     """Collect POSIX-style relative file paths under ``root``.
 
     Any file located under a ``.git/`` directory (at any depth) is excluded.
 
+    When ``apply_wrapica_filter`` is True, additionally excludes files that
+    wrapica would not upload to the ICA pipeline (top-level dotfiles and empty
+    files) via :func:`_is_uploaded_by_wrapica`. This is used for the source
+    (clone) side so its file set matches what wrapica actually deployed,
+    avoiding spurious "delete" diffs for files that never reach ICA.
+
     Args:
         root: Directory to walk.
+        apply_wrapica_filter: When True, drop files wrapica would not upload.
 
     Returns:
         List of relative file paths using forward slashes. Empty if the
@@ -65,6 +113,9 @@ def _collect_relative_files(root: Path) -> List[str]:
         # Exclude anything under a .git/ directory at any depth.
         if _GIT_DIR_NAME in relative.parts:
             continue
+        # Exclude files wrapica would not have uploaded (source side only).
+        if apply_wrapica_filter and not _is_uploaded_by_wrapica(path, root):
+            continue
         relative_paths.append(relative.as_posix())
     return relative_paths
 
@@ -75,7 +126,10 @@ def collect_file_paths(
 ) -> List[str]:
     """Collect the union of all relative file paths from both directories.
 
-    Excludes ``.git/`` directory contents.
+    Excludes ``.git/`` directory contents from both sides. On the source side,
+    additionally excludes files wrapica would not upload to ICA (top-level
+    dotfiles and empty files), so they don't surface as spurious "delete"
+    diffs against the pipeline export.
 
     Args:
         source_dir: Path to the cloned source repository.
@@ -84,7 +138,10 @@ def collect_file_paths(
     Returns:
         Sorted list of unique relative file paths (forward-slash separated).
     """
-    paths = set(_collect_relative_files(source_dir))
+    # Apply wrapica's upload prefilter to the source (clone) side so files
+    # wrapica never uploads (top-level dotfiles, empty files) don't appear as
+    # spurious "delete" diffs. The pipeline export side is taken as-is.
+    paths = set(_collect_relative_files(source_dir, apply_wrapica_filter=True))
     paths.update(_collect_relative_files(pipeline_dir))
     return sorted(paths)
 

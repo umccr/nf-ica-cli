@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /app
 
@@ -13,7 +13,7 @@ COPY nf_ica_cli/ ./nf_ica_cli/
 RUN pip wheel --no-deps --wheel-dir /app/dist .
 
 # --- Runtime stage ---
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 LABEL org.opencontainers.image.source="https://github.com/UMCCR/nf-ica-cli"
 LABEL org.opencontainers.image.description="CLI toolkit for orchestrating Nextflow pipeline deployments to ICA"

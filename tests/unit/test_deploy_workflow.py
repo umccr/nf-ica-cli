@@ -167,7 +167,10 @@ class TestHandleDeployWorkflow:
         call_kwargs = mock_create_pipeline.call_args
         assert call_kwargs[1]["project_id"] == "proj-uuid-1"
         assert call_kwargs[1]["workflow_name"] == "oncoanalyser"
-        assert call_kwargs[1]["version"] == "2.2.0"
+        # The ICA pipeline version is the long-hand "<version>__<timestamp>"
+        # derived from the annotated tag, so redeploying the same semantic
+        # version does not collide on ICA.
+        assert call_kwargs[1]["version"] == "2.2.0__20250715143022"
 
         # Verify GitHub release was created
         mock_create_release.assert_called_once()
@@ -393,7 +396,9 @@ workflow_version_description: ''
         data = load_yaml(pipelines_path)
         entry = data["pipelines"][0]
         assert entry["workflow_name"] == "oncoanalyser"
-        assert entry["workflow_version"] == "2.2.0"
+        # Recorded as the long-hand "<version>__<timestamp>" so each deploy of
+        # the same semantic version gets a distinct registry entry.
+        assert entry["workflow_version"] == "2.2.0__20250715143022"
         assert entry["git_commit_id"] == "abc1234def5678"
         assert entry["pipeline_id"] == "new-pipeline-uuid"
         assert entry["release_status"] == "DRAFT"

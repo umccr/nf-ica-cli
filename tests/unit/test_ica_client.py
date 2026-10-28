@@ -282,11 +282,15 @@ class TestZipSourceDirectory:
         assert zip_path.exists()
         assert zip_path.suffix == ".zip"
 
-        # Verify zip contents
+        # Verify zip contents. wrapica's *_from_zip extracts the archive and
+        # looks for the pipeline under a top-level directory named after the
+        # zip's stem, so every entry must be nested under "pipeline_source/".
         with zipfile.ZipFile(zip_path) as zf:
             names = sorted(zf.namelist())
-            assert "main.nf" in names
-            assert str(Path("modules/module.nf")) in names
+            assert str(Path("pipeline_source/main.nf")) in names
+            assert str(Path("pipeline_source/modules/module.nf")) in names
+            # Nothing should sit at the archive root.
+            assert all(n.startswith("pipeline_source/") for n in names)
 
         # Clean up
         zip_path.unlink()

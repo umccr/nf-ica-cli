@@ -39,6 +39,25 @@ class DeploymentTarget:
     secret_arn: str
 
 
+def _region_from_arn(arn: str) -> str | None:
+    """Extract the AWS region from an ARN.
+
+    ARNs have the form ``arn:<partition>:<service>:<region>:<account>:<resource>``,
+    so the region is the 4th colon-delimited field (index 3). Global services
+    (e.g. IAM) leave that field empty, in which case ``None`` is returned.
+
+    Args:
+        arn: The ARN to parse.
+
+    Returns:
+        The region string, or ``None`` if the ARN has no region component.
+    """
+    parts = arn.split(":")
+    if len(parts) >= 4 and parts[3]:
+        return parts[3]
+    return None
+
+
 def authenticate_oidc(aws_role_arn: str, secret_arn: str) -> str:
     """Assume AWS role via OIDC and retrieve ICA JWT from Secrets Manager.
 
@@ -102,11 +121,19 @@ def authenticate_oidc(aws_role_arn: str, secret_arn: str) -> str:
             f"via OIDC: {e}"
         ) from e
 
-    # Step 3: Create a Secrets Manager client with assumed role credentials
+    # Step 3: Create a Secrets Manager client with assumed role credentials.
+    # Secrets Manager is a regional service, so a region must be supplied.
+    # Derive it from the secret ARN (field 4: arn:aws:secretsmanager:<region>:...)
+    # so the client works regardless of AWS_REGION/AWS_DEFAULT_REGION being set
+    # in the environment. Fall back to the environment if the ARN is unparseable.
     credentials = assumed_role["Credentials"]
+    region_name = _region_from_arn(secret_arn) or os.environ.get(
+        "AWS_REGION"
+    ) or os.environ.get("AWS_DEFAULT_REGION")
     try:
         secrets_client = boto3.client(
             "secretsmanager",
+            region_name=region_name,
             aws_access_key_id=credentials["AccessKeyId"],
             aws_secret_access_key=credentials["SecretAccessKey"],
             aws_session_token=credentials["SessionToken"],
@@ -126,8 +153,15 @@ def authenticate_oidc(aws_role_arn: str, secret_arn: str) -> str:
             f"'{secret_arn}': {e}"
         ) from e
 
-    # Step 5: Set the environment variable for wrapica
+    # Step 5: Set the environment variables for wrapica.
+    # wrapica resolves its configuration from ICAV2_ACCESS_TOKEN and
+    # ICAV2_BASE_URL; if ICAV2_BASE_URL is unset it falls back to reading
+    # ~/.icav2/config.ica.yaml, which is intentionally unsupported and raises
+    # "Wrapica cannot read the user's config.ica.yaml file ...". Set both so
+    # wrapica never touches the config-file path. ICAV2_BASE_URL is only
+    # defaulted when not already provided, so it stays overridable.
     os.environ["ICAV2_ACCESS_TOKEN"] = jwt_token
+    os.environ.setdefault("ICAV2_BASE_URL", "https://ica.illumina.com/ica/rest")
 
     return jwt_token
 
@@ -173,7 +207,7 @@ def create_pipeline(
             nextflow_version=nextflow_version,
         )
 
-        return pipeline.pipeline.id
+        return str(pipeline.pipeline.id)
     except Exception as e:
         raise RuntimeError(
             f"Error: [ICA API] Failed to create pipeline "
@@ -212,15 +246,22 @@ def _zip_source_directory(source_dir: Path) -> Path:
             f"Error: [FILE ACCESS] Source path is not a directory: '{source_dir}'."
         )
 
-    # Create a temporary zip file
+    # Create a temporary zip file.
+    # wrapica's *_from_zip functions extract the archive and then look for the
+    # pipeline under a single top-level directory named after the zip's stem
+    # (i.e. temp_dir / zip_path.stem). The archive must therefore nest every
+    # entry under that folder; writing entries at the archive root makes
+    # wrapica look in a directory that doesn't exist and fail with
+    # "No such file or directory: .../pipeline_source/conf/icav2.config".
     tmp_dir = Path(tempfile.mkdtemp())
     zip_path = tmp_dir / "pipeline_source.zip"
+    root_dir = Path(zip_path.stem)  # top-level folder inside the archive
 
     try:
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for file_path in sorted(source_dir.rglob("*")):
                 if file_path.is_file():
-                    arcname = file_path.relative_to(source_dir)
+                    arcname = root_dir / file_path.relative_to(source_dir)
                     zf.write(file_path, arcname)
     except Exception as e:
         # Clean up on failure

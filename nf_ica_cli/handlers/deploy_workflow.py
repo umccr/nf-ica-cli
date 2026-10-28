@@ -103,6 +103,15 @@ def handle_deploy_workflow(
     workflow_version: str = args["--workflow-version"]
     annotated_tag_name: str = args["--annotated-tag-name"]
 
+    # Derive the ICA pipeline version from the annotated tag name. The tag has
+    # the form "<workflow-name>/<version>__<timestamp>", e.g.
+    # "bamtofastq/2.2.1__20261026083618". The long-hand "<version>__<timestamp>"
+    # is used as the ICA pipeline version so that redeploying the same semantic
+    # version produces a distinct, non-colliding pipeline version on ICA.
+    # The plain semantic workflow_version (e.g. "2.2.1") is still used for
+    # workflows.yaml registry lookups below.
+    ica_pipeline_version = annotated_tag_name.split("/", 1)[-1]
+
     # 2. Get tag message (Req 5.1)
     try:
         tag_message = get_tag_message(config_repo, annotated_tag_name)
@@ -169,6 +178,7 @@ def handle_deploy_workflow(
             config_repo=config_repo,
             workflow_name=workflow_name,
             workflow_version=workflow_version,
+            ica_pipeline_version=ica_pipeline_version,
             nextflow_version=nextflow_version,
             annotated_tag_name=annotated_tag_name,
             targets=targets,
@@ -187,6 +197,7 @@ def _deploy_to_targets(
     config_repo: Path,
     workflow_name: str,
     workflow_version: str,
+    ica_pipeline_version: str,
     nextflow_version: str,
     annotated_tag_name: str,
     targets: List[Tuple[Tenant, "IcaProject"]],
@@ -260,7 +271,7 @@ def _deploy_to_targets(
             pipeline_id = create_pipeline(
                 project_id=project.id,
                 workflow_name=workflow_name,
-                version=workflow_version,
+                version=ica_pipeline_version,
                 source_dir=clone_dir,
                 nextflow_version=nextflow_version,
                 description=description,
@@ -289,7 +300,7 @@ def _deploy_to_targets(
         _record_pipelines(
             config_repo=config_repo,
             workflow_name=workflow_name,
-            workflow_version=workflow_version,
+            workflow_version=ica_pipeline_version,
             tag_metadata=tag_metadata,
             nextflow_version=nextflow_version,
             deployments=successful_deployments,
