@@ -24,6 +24,9 @@ _GIT_DIR_NAME = ".git"
 # (always prefixed by ``+``/``-``/space in a unified diff) can never match.
 _GIT_INDEX_LINE_RE = re.compile(r"^index [0-9a-f]+\.\.[0-9a-f]+( [0-7]+)?$")
 
+# Matches ``old mode 100755`` / ``new mode 100644`` permission-change headers.
+_MODE_CHANGE_LINE_RE = re.compile(r"^(old|new) mode [0-7]+$")
+
 
 def _is_uploaded_by_wrapica(path: Path, root: Path) -> bool:
     """Return True if wrapica would upload ``path`` when building the pipeline.
@@ -268,11 +271,38 @@ def generate_single_file_diff(
         )
 
     # Exit code 1 => differences found.
-    return _normalize_diff_header(
+    normalized = _normalize_diff_header(
         result.stdout,
         relative_path,
         is_new_file=is_new_file,
         is_deleted=is_deleted,
+    )
+
+    # ICA does not preserve file permissions, so exec-bit differences are
+    # noise. Drop ``old mode``/``new mode`` lines, and skip the file entirely
+    # if nothing but the mode changed.
+    normalized = _strip_mode_change_lines(normalized)
+    if not is_new_file and not is_deleted and not _has_content_changes(normalized):
+        return None
+    return normalized
+
+
+def _strip_mode_change_lines(diff_text: str) -> str:
+    """Remove ``old mode <m>`` / ``new mode <m>`` header lines from a diff."""
+    lines = [ln for ln in diff_text.splitlines() if not _MODE_CHANGE_LINE_RE.match(ln)]
+    out = "\n".join(lines)
+    if diff_text.endswith("\n"):
+        out += "\n"
+    return out
+
+
+def _has_content_changes(diff_text: str) -> bool:
+    """Return True if the diff contains text hunks or a binary change."""
+    return any(
+        ln.startswith("--- ")
+        or ln.startswith("Binary files ")
+        or ln.startswith("GIT binary patch")
+        for ln in diff_text.splitlines()
     )
 
 
