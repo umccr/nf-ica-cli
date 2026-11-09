@@ -162,11 +162,11 @@ def _short_version_tag(workflow_version: str) -> str:
     return workflow_version.split("__", 1)[0]
 
 
-def _resolve_project_id(config: AppConfig, entry: PipelineEntry) -> str:
-    """Resolve the ICA project UUID for a pipeline entry.
+def _resolve_project(config: AppConfig, entry: PipelineEntry):
+    """Resolve the ICA project for a pipeline entry.
 
     A pipeline entry records its ``tenants`` and ``contexts`` but not the
-    project UUID. The project is the one inside the entry's tenant whose
+    project. The project is the one inside the entry's tenant whose
     contexts intersect the entry's contexts.
 
     Raises:
@@ -180,7 +180,7 @@ def _resolve_project_id(config: AppConfig, entry: PipelineEntry) -> str:
             continue
         for project in tenant.projects:
             if entry_contexts.intersection(project.contexts):
-                return project.id
+                return project
 
     raise SystemExit(
         f"Error: [NOT FOUND] Could not resolve an ICA project for pipeline "
@@ -188,6 +188,11 @@ def _resolve_project_id(config: AppConfig, entry: PipelineEntry) -> str:
         f"(tenants={entry.tenants}, contexts={entry.contexts}) in "
         f"ica_config.yaml."
     )
+
+
+def _resolve_project_id(config: AppConfig, entry: PipelineEntry) -> str:
+    """Resolve the ICA project UUID for a pipeline entry."""
+    return _resolve_project(config, entry).id
 
 
 # ---------------------------------------------------------------------------
@@ -562,10 +567,12 @@ def _release_body(
         get_github_blob_base_url(config_repo) if applied_patches else ""
     )
 
+    project = _resolve_project(config, entry)
+
     deployments = [
         DeploymentResult(
-            project_name=entry.contexts[0] if entry.contexts else entry.workflow_name,
-            project_id="",
+            project_name=project.name,
+            project_id=project.id,
             tenant_name=entry.tenants[0] if entry.tenants else "",
             pipeline_id=entry.pipeline_id,
             contexts=entry.contexts,
