@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import List, Tuple
 
 from nf_ica_cli.config import AppConfig, IcaProject, Tenant
-from nf_ica_cli.git_ops import clone_at_commit, get_tag_message
+from nf_ica_cli.git_ops import (
+    clone_at_commit,
+    get_github_blob_base_url,
+    get_tag_message,
+)
 from nf_ica_cli.ica_client import (
     authenticate_oidc,
     create_pipeline,
@@ -313,6 +317,19 @@ def _deploy_to_targets(
         create_pipeline_zip(clone_dir, zip_output_path)
 
         # 11b. Generate release body (Req 5.14)
+        # Resolve the ordered PatchEntry objects for the applied patch names so
+        # the release table can show each patch's permalink, md5sum and
+        # description. Unknown names (already validated earlier) are skipped.
+        registry_map = {entry.name: entry for entry in config.patches}
+        applied_patches = [
+            registry_map[name]
+            for name in tag_metadata.patch_names
+            if name in registry_map
+        ]
+        patch_base_url = (
+            get_github_blob_base_url(config_repo) if applied_patches else ""
+        )
+
         release_body = generate_release_body(
             workflow_name=workflow_name,
             workflow_version=workflow_version,
@@ -320,7 +337,8 @@ def _deploy_to_targets(
             workflow_version_description=tag_metadata.workflow_version_description,
             release_status=tag_metadata.release_status,
             nextflow_version=nextflow_version,
-            patch_names=tag_metadata.patch_names,
+            patches=applied_patches,
+            patch_base_url=patch_base_url,
             deployments=successful_deployments,
             skipped_projects=skipped_projects,
         )
@@ -331,6 +349,7 @@ def _deploy_to_targets(
                 tag_name=annotated_tag_name,
                 release_body=release_body,
                 artefact_paths=[zip_output_path],
+                draft=(tag_metadata.release_status == "DRAFT"),
             )
         except RuntimeError as e:
             logger.error(f"Failed to create GitHub Release: {e}")

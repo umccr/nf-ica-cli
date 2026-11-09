@@ -130,16 +130,27 @@ class TestMakeWorkflowVersion:
             "--workflow-version-tag=2.2.0",
             "--workflow-version-git-commit-id=abc1234",
             "--workflow-version-context=production",
-            "--release-status=DRAFT",
         ])
         assert args["deploy-workflow-version"] is True
         assert args["--workflow-name"] == "oncoanalyser"
         assert args["--workflow-version-tag"] == "2.2.0"
         assert args["--workflow-version-git-commit-id"] == "abc1234"
         assert args["--workflow-version-context"] == ["production"]
-        assert args["--release-status"] == "DRAFT"
         assert args["--workflow-patch-name"] == []
         assert args["--workflow-version-description"] is None
+
+    def test_release_status_flag_no_longer_accepted(self):
+        # --release-status was removed from deploy-workflow-version; releases
+        # are always DRAFT.
+        with pytest.raises(SystemExit):
+            parse_args([
+                "deploy-workflow-version",
+                "--workflow-name=oncoanalyser",
+                "--workflow-version-tag=2.2.0",
+                "--workflow-version-git-commit-id=abc1234",
+                "--workflow-version-context=production",
+                "--release-status=DRAFT",
+            ])
 
     def test_with_optional_patch_name(self):
         args = parse_args([
@@ -149,7 +160,6 @@ class TestMakeWorkflowVersion:
             "--workflow-version-git-commit-id=abc1234",
             "--workflow-version-context=production",
             "--workflow-patch-name=esvee-high-memory",
-            "--release-status=DRAFT",
         ])
         assert args["--workflow-patch-name"] == ["esvee-high-memory"]
 
@@ -162,7 +172,6 @@ class TestMakeWorkflowVersion:
             "--workflow-version-context=production",
             "--workflow-patch-name=patch-a",
             "--workflow-patch-name=patch-b",
-            "--release-status=DRAFT",
         ])
         assert args["--workflow-patch-name"] == ["patch-a", "patch-b"]
 
@@ -173,7 +182,6 @@ class TestMakeWorkflowVersion:
             "--workflow-version-tag=2.2.0",
             "--workflow-version-git-commit-id=abc1234",
             "--workflow-version-context=production",
-            "--release-status=RELEASED",
             "--workflow-version-description=Initial production release",
         ])
         assert args["--workflow-version-description"] == "Initial production release"
@@ -186,35 +194,52 @@ class TestMakeWorkflowVersion:
             "--workflow-version-git-commit-id=abc1234",
             "--workflow-version-context=production",
             "--workflow-version-context=staging",
-            "--release-status=DRAFT",
         ])
         assert args["--workflow-version-context"] == ["production", "staging"]
-
-    def test_missing_release_status(self):
-        with pytest.raises(SystemExit):
-            parse_args([
-                "deploy-workflow-version",
-                "--workflow-name=oncoanalyser",
-                "--workflow-version-tag=2.2.0",
-                "--workflow-version-git-commit-id=abc1234",
-                "--workflow-version-context=production",
-            ])
 
 
 class TestUpdateWorkflowVersionReleaseStatus:
     """Test update-workflow-version-release-status subcommand argument parsing."""
 
-    def test_all_required_flags(self):
+    def test_release_status_flags(self):
         args = parse_args([
             "update-workflow-version-release-status",
             "--workflow-name=oncoanalyser",
-            "--workflow-version-tag=2.2.0",
+            "--workflow-version-tag=2.2.0__20250101120000",
             "--release-status=RELEASED",
         ])
         assert args["update-workflow-version-release-status"] is True
         assert args["--workflow-name"] == "oncoanalyser"
-        assert args["--workflow-version-tag"] == "2.2.0"
+        assert args["--workflow-version-tag"] == "2.2.0__20250101120000"
         assert args["--release-status"] == "RELEASED"
+        assert args["--git-commit-id"] is None
+        assert args["--add-patch"] == []
+        assert args["--remove-patch"] == []
+
+    def test_git_commit_and_patch_flags(self):
+        args = parse_args([
+            "update-workflow-version-release-status",
+            "--workflow-name=oncoanalyser",
+            "--workflow-version-tag=2.2.0__20250101120000",
+            "--git-commit-id=def5678",
+            "--add-patch=patch-a",
+            "--add-patch=patch-b",
+            "--remove-patch=patch-c",
+        ])
+        assert args["--release-status"] is None
+        assert args["--git-commit-id"] == "def5678"
+        assert args["--add-patch"] == ["patch-a", "patch-b"]
+        assert args["--remove-patch"] == ["patch-c"]
+
+    def test_release_status_now_optional(self):
+        # --release-status is optional; parsing succeeds without it.
+        args = parse_args([
+            "update-workflow-version-release-status",
+            "--workflow-name=oncoanalyser",
+            "--workflow-version-tag=2.2.0__20250101120000",
+            "--add-patch=patch-a",
+        ])
+        assert args["--release-status"] is None
 
     def test_missing_workflow_name(self):
         with pytest.raises(SystemExit):
@@ -222,14 +247,6 @@ class TestUpdateWorkflowVersionReleaseStatus:
                 "update-workflow-version-release-status",
                 "--workflow-version-tag=2.2.0",
                 "--release-status=RELEASED",
-            ])
-
-    def test_missing_release_status(self):
-        with pytest.raises(SystemExit):
-            parse_args([
-                "update-workflow-version-release-status",
-                "--workflow-name=oncoanalyser",
-                "--workflow-version-tag=2.2.0",
             ])
 
 

@@ -76,17 +76,19 @@ def _make_args(
     git_commit_id="abc1234",
     contexts=None,
     patch_names=None,
-    release_status="DRAFT",
     description=None,
 ):
-    """Helper to build a docopt-like args dict."""
+    """Helper to build a docopt-like args dict.
+
+    Note: deploy-workflow-version no longer accepts --release-status; releases
+    are always created as DRAFT.
+    """
     return {
         "--workflow-name": workflow_name,
         "--workflow-version-tag": version_tag,
         "--workflow-version-git-commit-id": git_commit_id,
         "--workflow-version-context": contexts or ["production"],
         "--workflow-patch-name": patch_names or [],
-        "--release-status": release_status,
         "--workflow-version-description": description,
     }
 
@@ -181,29 +183,21 @@ class TestMakeWorkflowVersionSuccess:
     @patch("nf_ica_cli.handlers.deploy_workflow_version.create_annotated_tag")
     @patch("nf_ica_cli.handlers.deploy_workflow_version.tag_exists", return_value=False)
     @patch("nf_ica_cli.handlers.deploy_workflow_version.make_tag_name", return_value="oncoanalyser/2.2.0__20250715143022")
-    def test_creates_tag_with_released_status(
+    def test_release_status_always_draft(
         self, mock_make_tag, mock_tag_exists, mock_create_tag, mock_ensure_main, sample_config, tmp_path
     ):
-        args = _make_args(release_status="RELEASED")
+        """The encoded tag is always DRAFT regardless of caller input."""
+        args = _make_args()
 
         handle_deploy_workflow_version(args, sample_config, tmp_path)
 
         tag_message = mock_create_tag.call_args[0][2]
-        assert "RELEASED" in tag_message
+        assert "release_status: DRAFT" in tag_message
+        assert "RELEASED" not in tag_message
 
 
 class TestMakeWorkflowVersionValidation:
     """Tests for validation failures before tag creation."""
-
-    def test_invalid_release_status_raises_system_exit(self, sample_config, tmp_path):
-        args = _make_args(release_status="INVALID")
-
-        with pytest.raises(SystemExit) as exc_info:
-            handle_deploy_workflow_version(args, sample_config, tmp_path)
-
-        error_msg = str(exc_info.value)
-        assert "VALIDATION" in error_msg
-        assert "INVALID" in error_msg
 
     def test_invalid_context_raises_system_exit(self, sample_config, tmp_path):
         args = _make_args(contexts=["staging"])
@@ -267,6 +261,32 @@ class TestMakeWorkflowVersionValidation:
         assert "fix-memory" in error_msg
         assert "add-retry" in error_msg
 
+    def test_duplicate_patch_raises_system_exit(self, sample_config, tmp_path):
+        args = _make_args(patch_names=["fix-memory", "fix-memory"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            handle_deploy_workflow_version(args, sample_config, tmp_path)
+
+        error_msg = str(exc_info.value)
+        assert "VALIDATION" in error_msg
+        assert "Duplicate" in error_msg
+        assert "fix-memory" in error_msg
+
+    @patch("nf_ica_cli.handlers.deploy_workflow_version.create_annotated_tag")
+    @patch("nf_ica_cli.handlers.deploy_workflow_version.tag_exists")
+    @patch("nf_ica_cli.handlers.deploy_workflow_version.make_tag_name")
+    def test_duplicate_patch_does_not_call_git(
+        self, mock_make_tag, mock_tag_exists, mock_create_tag, sample_config, tmp_path
+    ):
+        args = _make_args(patch_names=["fix-memory", "add-retry", "fix-memory"])
+
+        with pytest.raises(SystemExit):
+            handle_deploy_workflow_version(args, sample_config, tmp_path)
+
+        mock_make_tag.assert_not_called()
+        mock_tag_exists.assert_not_called()
+        mock_create_tag.assert_not_called()
+
     @patch("nf_ica_cli.handlers.deploy_workflow_version.ensure_on_up_to_date_main")
     @patch("nf_ica_cli.handlers.deploy_workflow_version.tag_exists", return_value=True)
     @patch("nf_ica_cli.handlers.deploy_workflow_version.make_tag_name", return_value="oncoanalyser/2.2.0__20250715143022")
@@ -302,21 +322,6 @@ class TestMakeWorkflowVersionValidation:
 
 class TestMakeWorkflowVersionValidationOrder:
     """Tests to verify all validation happens BEFORE tag creation (Req 3.3)."""
-
-    @patch("nf_ica_cli.handlers.deploy_workflow_version.create_annotated_tag")
-    @patch("nf_ica_cli.handlers.deploy_workflow_version.tag_exists")
-    @patch("nf_ica_cli.handlers.deploy_workflow_version.make_tag_name")
-    def test_invalid_release_status_does_not_call_git(
-        self, mock_make_tag, mock_tag_exists, mock_create_tag, sample_config, tmp_path
-    ):
-        args = _make_args(release_status="INVALID")
-
-        with pytest.raises(SystemExit):
-            handle_deploy_workflow_version(args, sample_config, tmp_path)
-
-        mock_make_tag.assert_not_called()
-        mock_tag_exists.assert_not_called()
-        mock_create_tag.assert_not_called()
 
     @patch("nf_ica_cli.handlers.deploy_workflow_version.create_annotated_tag")
     @patch("nf_ica_cli.handlers.deploy_workflow_version.tag_exists")

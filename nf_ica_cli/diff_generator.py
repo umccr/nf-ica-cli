@@ -27,6 +27,13 @@ _GIT_INDEX_LINE_RE = re.compile(r"^index [0-9a-f]+\.\.[0-9a-f]+( [0-7]+)?$")
 # Matches ``old mode 100755`` / ``new mode 100644`` permission-change headers.
 _MODE_CHANGE_LINE_RE = re.compile(r"^(old|new) mode [0-7]+$")
 
+# File names / suffixes wrapica never uploads, at any depth (conda environment
+# and module meta files, nf-test files and snapshots).
+_WRAPICA_EXCLUDED_NAMES = frozenset(
+    {"environment.yml", "environment.yaml", "meta.yml", "meta.yaml"}
+)
+_WRAPICA_EXCLUDED_SUFFIXES = (".test", ".test.snap")
+
 
 def _is_uploaded_by_wrapica(path: Path, root: Path) -> bool:
     """Return True if wrapica would upload ``path`` when building the pipeline.
@@ -38,6 +45,9 @@ def _is_uploaded_by_wrapica(path: Path, root: Path) -> bool:
     * files whose top-level path component (relative to the pipeline root)
       starts with ``.`` (e.g. ``.github/...``, ``.gitignore``,
       ``.gitattributes``), and
+    * conda/meta files (``environment.yml``, ``environment.yaml``,
+      ``meta.yml``, ``meta.yaml``) and nf-test files (``*.test``,
+      ``*.test.snap``) at any depth, and
     * empty files (zero bytes).
 
     These files are therefore never present in the exported ICA pipeline
@@ -60,6 +70,12 @@ def _is_uploaded_by_wrapica(path: Path, root: Path) -> bool:
 
     # Skip files whose top-level directory/name starts with a dot.
     if relative.parts and relative.parts[0].startswith("."):
+        return False
+
+    # Skip nf-core test files and conda/meta files (at any depth).
+    if path.name in _WRAPICA_EXCLUDED_NAMES or path.name.endswith(
+        _WRAPICA_EXCLUDED_SUFFIXES
+    ):
         return False
 
     # Skip empty files.

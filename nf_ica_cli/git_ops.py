@@ -253,3 +253,105 @@ def _strip_pgp_signature(message: str) -> str:
     if idx == -1:
         return message
     return message[:idx]
+
+
+def get_head_commit(repo_dir: Path) -> str:
+    """Return the full SHA of the repository's current HEAD commit.
+
+    Parameters
+    ----------
+    repo_dir : Path
+        Path to the git repository.
+
+    Returns
+    -------
+    str
+        The 40-character hexadecimal commit SHA of HEAD.
+
+    Raises
+    ------
+    RuntimeError
+        If the git command fails.
+    """
+    result = _run_git(
+        ["rev-parse", "HEAD"],
+        cwd=repo_dir,
+        error_context="Failed to determine HEAD commit",
+    )
+    return result.stdout.strip()
+
+
+def _normalise_github_remote(remote_url: str) -> str:
+    """Normalise a GitHub remote URL to its ``https://github.com/<owner>/<repo>`` form.
+
+    Handles the common SSH and HTTPS remote forms:
+    - ``git@github.com:owner/repo.git``
+    - ``ssh://git@github.com/owner/repo.git``
+    - ``https://github.com/owner/repo.git``
+    - ``https://github.com/owner/repo``
+
+    Any trailing ``.git`` suffix and trailing slash are removed.
+
+    Parameters
+    ----------
+    remote_url : str
+        The raw remote URL reported by ``git remote get-url``.
+
+    Returns
+    -------
+    str
+        The canonical ``https://github.com/<owner>/<repo>`` URL.
+    """
+    url = remote_url.strip()
+
+    # SCP-like syntax: git@github.com:owner/repo.git
+    if url.startswith("git@"):
+        # Strip "git@" and split host from path on the first colon.
+        host_and_path = url[len("git@"):]
+        host, _, path = host_and_path.partition(":")
+        url = f"https://{host}/{path}"
+    elif url.startswith("ssh://"):
+        # ssh://git@github.com/owner/repo.git
+        without_scheme = url[len("ssh://"):]
+        if "@" in without_scheme:
+            without_scheme = without_scheme.split("@", 1)[1]
+        url = f"https://{without_scheme}"
+
+    # Drop trailing slash then trailing .git
+    url = url.rstrip("/")
+    if url.endswith(".git"):
+        url = url[: -len(".git")]
+
+    return url
+
+
+def get_github_blob_base_url(repo_dir: Path) -> str:
+    """Build a GitHub permalink base URL pinned at the repository's HEAD commit.
+
+    The returned value has the form
+    ``https://github.com/<owner>/<repo>/blob/<head_sha>`` and can be joined
+    with a repo-relative file path to produce a stable permalink.
+
+    Parameters
+    ----------
+    repo_dir : Path
+        Path to the git repository (must have an ``origin`` remote).
+
+    Returns
+    -------
+    str
+        The GitHub blob base URL pinned at HEAD.
+
+    Raises
+    ------
+    RuntimeError
+        If the git commands fail (e.g. no ``origin`` remote configured).
+    """
+    result = _run_git(
+        ["remote", "get-url", "origin"],
+        cwd=repo_dir,
+        error_context="Failed to determine 'origin' remote URL",
+    )
+    repo_url = _normalise_github_remote(result.stdout)
+    head_sha = get_head_commit(repo_dir)
+    return f"{repo_url}/blob/{head_sha}"

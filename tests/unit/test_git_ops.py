@@ -15,6 +15,9 @@ from nf_ica_cli.git_ops import (
     tag_exists,
     clone_at_commit,
     get_tag_message,
+    get_head_commit,
+    get_github_blob_base_url,
+    _normalise_github_remote,
 )
 
 
@@ -295,3 +298,78 @@ class TestGetTagMessage:
         result = get_tag_message(repo_dir, "oncoanalyser/2.2.0__20250715")
 
         assert result == yaml_message
+
+
+class TestGetHeadCommit:
+    """Tests for get_head_commit."""
+
+    def test_returns_stripped_sha(self, mock_subprocess_run):
+        mock_subprocess_run.return_value = _make_completed_process(
+            stdout="deadbeefcafe1234567890abcdef1234567890ab\n"
+        )
+        sha = get_head_commit(Path("/repo"))
+        assert sha == "deadbeefcafe1234567890abcdef1234567890ab"
+        args = mock_subprocess_run.call_args[0][0]
+        assert args == ["git", "rev-parse", "HEAD"]
+
+    def test_raises_on_failure(self, mock_subprocess_run):
+        mock_subprocess_run.return_value = _make_completed_process(
+            returncode=128, stderr="fatal: not a git repository"
+        )
+        with pytest.raises(RuntimeError, match="Failed to determine HEAD commit"):
+            get_head_commit(Path("/repo"))
+
+
+class TestNormaliseGithubRemote:
+    """Tests for _normalise_github_remote URL normalisation."""
+
+    def test_scp_like_ssh_with_git_suffix(self):
+        assert (
+            _normalise_github_remote("git@github.com:umccr/nf-ica.git")
+            == "https://github.com/umccr/nf-ica"
+        )
+
+    def test_ssh_scheme_with_git_suffix(self):
+        assert (
+            _normalise_github_remote("ssh://git@github.com/umccr/nf-ica.git")
+            == "https://github.com/umccr/nf-ica"
+        )
+
+    def test_https_with_git_suffix(self):
+        assert (
+            _normalise_github_remote("https://github.com/umccr/nf-ica.git")
+            == "https://github.com/umccr/nf-ica"
+        )
+
+    def test_https_without_git_suffix(self):
+        assert (
+            _normalise_github_remote("https://github.com/umccr/nf-ica")
+            == "https://github.com/umccr/nf-ica"
+        )
+
+    def test_trailing_slash_and_whitespace(self):
+        assert (
+            _normalise_github_remote("  https://github.com/umccr/nf-ica/  \n")
+            == "https://github.com/umccr/nf-ica"
+        )
+
+
+class TestGetGithubBlobBaseUrl:
+    """Tests for get_github_blob_base_url."""
+
+    def test_builds_blob_url_pinned_at_head(self, mock_subprocess_run):
+        mock_subprocess_run.side_effect = [
+            _make_completed_process(stdout="git@github.com:umccr/nf-ica.git\n"),
+            _make_completed_process(stdout="deadbeef1234\n"),
+        ]
+        url = get_github_blob_base_url(Path("/repo"))
+        assert url == "https://github.com/umccr/nf-ica/blob/deadbeef1234"
+
+    def test_raises_when_no_origin(self, mock_subprocess_run):
+        mock_subprocess_run.return_value = _make_completed_process(
+            returncode=2, stderr="error: No such remote 'origin'"
+        )
+        with pytest.raises(
+            RuntimeError, match="Failed to determine 'origin' remote URL"
+        ):
+            get_github_blob_base_url(Path("/repo"))

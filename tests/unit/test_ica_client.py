@@ -17,6 +17,8 @@ from nf_ica_cli.ica_client import (
     _zip_source_directory,
     authenticate_oidc,
     create_pipeline,
+    release_pipeline,
+    update_pipeline,
 )
 
 
@@ -325,3 +327,59 @@ class TestZipSourceDirectory:
         # Clean up
         zip_path.unlink()
         zip_path.parent.rmdir()
+
+
+class TestUpdatePipeline:
+    """Tests for update_pipeline function."""
+
+    @patch("nf_ica_cli.ica_client.pipeline_update_from_zip")
+    def test_updates_pipeline_successfully(self, mock_update, tmp_path):
+        source_dir = tmp_path / "source"
+        source_dir.mkdir()
+        (source_dir / "main.nf").write_text("workflow { }")
+
+        update_pipeline(
+            project_id="project-123",
+            pipeline_id="pipeline-456",
+            source_dir=source_dir,
+        )
+
+        mock_update.assert_called_once()
+        kwargs = mock_update.call_args[1]
+        assert kwargs["project_id"] == "project-123"
+        assert kwargs["pipeline_id"] == "pipeline-456"
+        assert "zip_path" in kwargs
+
+    @patch("nf_ica_cli.ica_client.pipeline_update_from_zip")
+    def test_raises_on_update_failure(self, mock_update, tmp_path):
+        source_dir = tmp_path / "source"
+        source_dir.mkdir()
+        (source_dir / "main.nf").write_text("workflow { }")
+
+        mock_update.side_effect = Exception("API error")
+
+        with pytest.raises(RuntimeError, match="Failed to update pipeline"):
+            update_pipeline(
+                project_id="project-123",
+                pipeline_id="pipeline-456",
+                source_dir=source_dir,
+            )
+
+
+class TestReleasePipeline:
+    """Tests for release_pipeline function."""
+
+    @patch("nf_ica_cli.ica_client.release_project_pipeline")
+    def test_releases_pipeline_successfully(self, mock_release):
+        release_pipeline(project_id="project-123", pipeline_id="pipeline-456")
+
+        mock_release.assert_called_once_with(
+            project_id="project-123", pipeline_id="pipeline-456"
+        )
+
+    @patch("nf_ica_cli.ica_client.release_project_pipeline")
+    def test_raises_on_release_failure(self, mock_release):
+        mock_release.side_effect = Exception("API error")
+
+        with pytest.raises(RuntimeError, match="Failed to release pipeline"):
+            release_pipeline(project_id="project-123", pipeline_id="pipeline-456")

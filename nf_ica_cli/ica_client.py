@@ -17,6 +17,8 @@ import boto3
 from wrapica.literals import NextflowPipelineVersionType
 from wrapica.project_pipelines import (
     create_nextflow_pipeline_from_zip,
+    pipeline_update_from_zip,
+    release_project_pipeline,
 )
 
 
@@ -218,6 +220,65 @@ def create_pipeline(
         # _zip_source_directory() creates the zip inside a dedicated temp dir,
         # so removing the parent directory cleans up both the zip and the dir.
         shutil.rmtree(zip_path.parent, ignore_errors=True)
+
+
+def update_pipeline(
+    project_id: str,
+    pipeline_id: str,
+    source_dir: Path,
+) -> None:
+    """Replace the source files of an existing ICA pipeline from a directory.
+
+    Zips the source directory and uploads it via wrapica's
+    ``pipeline_update_from_zip`` so the pipeline's attached files are replaced
+    with the new source tree. Used when a draft release's patch set or source
+    commit changes and the deployed pipeline asset must be refreshed.
+
+    Args:
+        project_id: The ICA project UUID that owns the pipeline.
+        pipeline_id: The ICA pipeline UUID to update.
+        source_dir: Path to the directory containing the new pipeline source.
+
+    Raises:
+        RuntimeError: If the pipeline update fails.
+    """
+    zip_path = _zip_source_directory(source_dir)
+
+    try:
+        pipeline_update_from_zip(
+            project_id=project_id,
+            pipeline_id=pipeline_id,
+            zip_path=zip_path,
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Error: [ICA API] Failed to update pipeline '{pipeline_id}' in "
+            f"project '{project_id}': {e}"
+        ) from e
+    finally:
+        shutil.rmtree(zip_path.parent, ignore_errors=True)
+
+
+def release_pipeline(project_id: str, pipeline_id: str) -> None:
+    """Transition an ICA pipeline to RELEASED status via wrapica.
+
+    Args:
+        project_id: The ICA project UUID that owns the pipeline.
+        pipeline_id: The ICA pipeline UUID to release.
+
+    Raises:
+        RuntimeError: If the release call fails.
+    """
+    try:
+        release_project_pipeline(
+            project_id=project_id,
+            pipeline_id=pipeline_id,
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Error: [ICA API] Failed to release pipeline '{pipeline_id}' in "
+            f"project '{project_id}': {e}"
+        ) from e
 
 
 def _zip_source_directory(source_dir: Path) -> Path:

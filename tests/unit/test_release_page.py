@@ -6,11 +6,13 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from nf_ica_cli.patches import PatchEntry
 from nf_ica_cli.release_page import (
     DeploymentResult,
     generate_release_body,
     create_pipeline_zip,
     create_github_release,
+    update_github_release,
 )
 
 
@@ -61,7 +63,8 @@ class TestGenerateReleaseBody:
             workflow_version_description="",
             release_status="DRAFT",
             nextflow_version="23.10.0",
-            patch_names=[],
+            patches=[],
+            patch_base_url="",
             deployments=self._make_deployments(),
             skipped_projects=[],
         )
@@ -75,7 +78,8 @@ class TestGenerateReleaseBody:
             workflow_version_description="",
             release_status="DRAFT",
             nextflow_version="23.10.0",
-            patch_names=[],
+            patches=[],
+            patch_base_url="",
             deployments=self._make_deployments(),
             skipped_projects=[],
         )
@@ -89,7 +93,8 @@ class TestGenerateReleaseBody:
             workflow_version_description="Bug fix for memory issue",
             release_status="DRAFT",
             nextflow_version="23.10.0",
-            patch_names=[],
+            patches=[],
+            patch_base_url="",
             deployments=self._make_deployments(),
             skipped_projects=[],
         )
@@ -104,7 +109,8 @@ class TestGenerateReleaseBody:
             workflow_version_description="",
             release_status="DRAFT",
             nextflow_version="23.10.0",
-            patch_names=[],
+            patches=[],
+            patch_base_url="",
             deployments=self._make_deployments(),
             skipped_projects=[],
         )
@@ -118,7 +124,8 @@ class TestGenerateReleaseBody:
             workflow_version_description="",
             release_status="RELEASED",
             nextflow_version="23.10.0",
-            patch_names=[],
+            patches=[],
+            patch_base_url="",
             deployments=self._make_deployments(),
             skipped_projects=[],
         )
@@ -132,7 +139,8 @@ class TestGenerateReleaseBody:
             workflow_version_description="",
             release_status="DRAFT",
             nextflow_version="23.10.0",
-            patch_names=[],
+            patches=[],
+            patch_base_url="",
             deployments=self._make_deployments(),
             skipped_projects=[],
         )
@@ -146,7 +154,8 @@ class TestGenerateReleaseBody:
             workflow_version_description="",
             release_status="DRAFT",
             nextflow_version="23.10.0",
-            patch_names=[],
+            patches=[],
+            patch_base_url="",
             deployments=self._make_deployments(),
             skipped_projects=[],
         )
@@ -164,6 +173,20 @@ class TestGenerateReleaseBody:
         assert "production, staging" in body
 
     def test_release_body_contains_patches_section(self):
+        patches = [
+            PatchEntry(
+                name="fix-memory",
+                path="patches/aaaa1111bbbb2222cccc3333dddd4444.txt",
+                md5sum="aaaa1111bbbb2222cccc3333dddd4444",
+                description="Fix memory allocation",
+            ),
+            PatchEntry(
+                name="add-retry",
+                path="patches/eeee5555ffff6666gggg7777hhhh8888.txt",
+                md5sum="eeee5555ffff6666gggg7777hhhh8888",
+                description="Add retry logic",
+            ),
+        ]
         body = generate_release_body(
             workflow_name="oncoanalyser",
             workflow_version="2.2.0",
@@ -171,13 +194,33 @@ class TestGenerateReleaseBody:
             workflow_version_description="",
             release_status="DRAFT",
             nextflow_version="23.10.0",
-            patch_names=["fix-memory", "add-retry"],
+            patches=patches,
+            patch_base_url="https://github.com/umccr/nf-ica/blob/deadbeef",
             deployments=self._make_deployments(),
             skipped_projects=[],
         )
         assert "## Applied Patches" in body
-        assert "- fix-memory" in body
-        assert "- add-retry" in body
+        # Table headers
+        assert "| Name" in body
+        assert "| URL" in body
+        assert "| MD5sum" in body
+        assert "| Description" in body
+        # Patch names
+        assert "fix-memory" in body
+        assert "add-retry" in body
+        # Permalink URLs built from base + repo-relative path
+        assert (
+            "https://github.com/umccr/nf-ica/blob/deadbeef/"
+            "patches/aaaa1111bbbb2222cccc3333dddd4444.txt"
+        ) in body
+        assert (
+            "https://github.com/umccr/nf-ica/blob/deadbeef/"
+            "patches/eeee5555ffff6666gggg7777hhhh8888.txt"
+        ) in body
+        # md5sums and descriptions
+        assert "`aaaa1111bbbb2222cccc3333dddd4444`" in body
+        assert "Fix memory allocation" in body
+        assert "Add retry logic" in body
 
     def test_release_body_omits_patches_section_when_empty(self):
         body = generate_release_body(
@@ -187,7 +230,8 @@ class TestGenerateReleaseBody:
             workflow_version_description="",
             release_status="DRAFT",
             nextflow_version="23.10.0",
-            patch_names=[],
+            patches=[],
+            patch_base_url="",
             deployments=self._make_deployments(),
             skipped_projects=[],
         )
@@ -201,7 +245,8 @@ class TestGenerateReleaseBody:
             workflow_version_description="",
             release_status="DRAFT",
             nextflow_version="23.10.0",
-            patch_names=[],
+            patches=[],
+            patch_base_url="",
             deployments=self._make_deployments(),
             skipped_projects=["project-gamma", "project-delta"],
         )
@@ -217,7 +262,8 @@ class TestGenerateReleaseBody:
             workflow_version_description="",
             release_status="DRAFT",
             nextflow_version="23.10.0",
-            patch_names=[],
+            patches=[],
+            patch_base_url="",
             deployments=self._make_deployments(),
             skipped_projects=[],
         )
@@ -312,9 +358,54 @@ class TestCreateGithubRelease:
         assert cmd[1] == "release"
         assert cmd[2] == "create"
         assert cmd[3] == "oncoanalyser/2.2.0__20250715143022"
-        assert cmd[4] == "--notes"
-        assert cmd[5] == "# Release notes"
-        assert cmd[6] == "/tmp/pipeline.zip"
+        assert cmd[4] == "--title"
+        assert cmd[5] == "oncoanalyser/2.2.0__20250715143022"
+        assert cmd[6] == "--notes"
+        assert cmd[7] == "# Release notes"
+        assert cmd[8] == "/tmp/pipeline.zip"
+
+    @patch("nf_ica_cli.release_page.subprocess.run")
+    def test_adds_draft_flag_when_draft_true(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+
+        create_github_release(
+            tag_name="oncoanalyser/2.2.0__20250715143022",
+            release_body="# Release notes",
+            artefact_paths=[Path("/tmp/pipeline.zip")],
+            draft=True,
+        )
+
+        cmd = mock_run.call_args[0][0]
+        assert "--draft" in cmd
+        # Artefact path still appended after the flag
+        assert "/tmp/pipeline.zip" in cmd
+
+    @patch("nf_ica_cli.release_page.subprocess.run")
+    def test_omits_draft_flag_by_default(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+
+        create_github_release(
+            tag_name="oncoanalyser/2.2.0__20250715143022",
+            release_body="# Release notes",
+            artefact_paths=[Path("/tmp/pipeline.zip")],
+        )
+
+        cmd = mock_run.call_args[0][0]
+        assert "--draft" not in cmd
+
+    @patch("nf_ica_cli.release_page.subprocess.run")
+    def test_omits_draft_flag_when_draft_false(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+
+        create_github_release(
+            tag_name="oncoanalyser/2.2.0__20250715143022",
+            release_body="# Release notes",
+            artefact_paths=[],
+            draft=False,
+        )
+
+        cmd = mock_run.call_args[0][0]
+        assert "--draft" not in cmd
 
     @patch("nf_ica_cli.release_page.subprocess.run")
     def test_handles_multiple_artefacts(self, mock_run):
@@ -374,6 +465,87 @@ class TestCreateGithubRelease:
             "release",
             "create",
             "workflow/1.0.0__20250101120000",
+            "--title",
+            "workflow/1.0.0__20250101120000",
             "--notes",
             "body",
         ]
+
+
+class TestUpdateGithubRelease:
+    """Tests for the update_github_release function."""
+
+    @patch("nf_ica_cli.release_page.subprocess.run")
+    def test_edits_notes_only_when_no_artefacts(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+
+        update_github_release(
+            tag_name="sash/0.6.5-rc__x",
+            release_body="# notes",
+            artefact_paths=[],
+        )
+
+        # Only the edit command runs.
+        assert mock_run.call_count == 1
+        cmd = mock_run.call_args_list[0][0][0]
+        assert cmd[:4] == ["gh", "release", "edit", "sash/0.6.5-rc__x"]
+        assert "--notes" in cmd
+        assert "--draft=false" not in cmd
+
+    @patch("nf_ica_cli.release_page.subprocess.run")
+    def test_publish_clears_draft_flag(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+
+        update_github_release(
+            tag_name="sash/0.6.5-rc__x",
+            release_body="# notes",
+            artefact_paths=[],
+            publish=True,
+        )
+
+        cmd = mock_run.call_args_list[0][0][0]
+        assert "--draft=false" in cmd
+
+    @patch("nf_ica_cli.release_page.subprocess.run")
+    def test_uploads_artefacts_with_clobber(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+
+        update_github_release(
+            tag_name="sash/0.6.5-rc__x",
+            release_body="# notes",
+            artefact_paths=[Path("/tmp/a.zip")],
+        )
+
+        assert mock_run.call_count == 2
+        upload_cmd = mock_run.call_args_list[1][0][0]
+        assert upload_cmd[:4] == ["gh", "release", "upload", "sash/0.6.5-rc__x"]
+        assert "/tmp/a.zip" in upload_cmd
+        assert "--clobber" in upload_cmd
+
+    @patch("nf_ica_cli.release_page.subprocess.run")
+    def test_raises_on_edit_failure(self, mock_run):
+        import subprocess as sp
+
+        mock_run.side_effect = sp.CalledProcessError(
+            returncode=1,
+            cmd=["gh", "release", "edit"],
+            stderr="release not found",
+        )
+
+        with pytest.raises(RuntimeError, match="Failed to update release"):
+            update_github_release(
+                tag_name="sash/0.6.5-rc__x",
+                release_body="# notes",
+                artefact_paths=[],
+            )
+
+    @patch("nf_ica_cli.release_page.subprocess.run")
+    def test_raises_when_gh_not_found(self, mock_run):
+        mock_run.side_effect = FileNotFoundError("gh missing")
+
+        with pytest.raises(RuntimeError, match="'gh' CLI tool is not installed"):
+            update_github_release(
+                tag_name="sash/0.6.5-rc__x",
+                release_body="# notes",
+                artefact_paths=[],
+            )

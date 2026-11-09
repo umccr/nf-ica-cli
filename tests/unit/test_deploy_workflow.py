@@ -496,6 +496,9 @@ workflow_version_description: ''
         # Both should be in the release
         mock_create_release.assert_called_once()
 
+        # DRAFT release status should create a GitHub draft release
+        assert mock_create_release.call_args.kwargs["draft"] is True
+
     @patch("nf_ica_cli.handlers.deploy_workflow.create_github_release")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline_zip")
     @patch("nf_ica_cli.handlers.deploy_workflow.create_pipeline")

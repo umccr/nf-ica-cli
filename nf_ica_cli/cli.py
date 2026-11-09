@@ -66,7 +66,6 @@ Usage:
         (--workflow-version-git-commit-id=<id>)
         (--workflow-version-context=<ctx>...)
         [--workflow-patch-name=<patch>...]
-        (--release-status=<status>)
         [--workflow-version-description=<desc>]
 
 Options:
@@ -75,23 +74,49 @@ Options:
     --workflow-version-git-commit-id=<id>    Full git commit SHA
     --workflow-version-context=<ctx>         Deployment context(s) (repeatable)
     --workflow-patch-name=<patch>            Patch name(s) to apply (repeatable, optional)
-    --release-status=<status>               Release status (DRAFT or RELEASED)
     --workflow-version-description=<desc>    Optional description for the version
     -h --help                                Show this help message
+
+Note:
+    Deployments are always created as DRAFT releases. Use
+    'update-workflow-version-release-status --release-status RELEASED' to
+    publish a release once it has been verified.
 """,
-    "update-workflow-version-release-status": """Update release status of a pipeline entry.
+    "update-workflow-version-release-status": """Update a deployed pipeline entry.
+
+Updates a DRAFT pipeline entry: either publish it (--release-status RELEASED),
+or amend its source commit and/or patch set (--git-commit-id, --add-patch,
+--remove-patch). Changes are reflected in ica_pipelines.yaml, the ICA pipeline,
+and the GitHub release. A pipeline already in RELEASED status cannot be changed.
 
 Usage:
     nf-ica update-workflow-version-release-status
         (--workflow-name=<name>)
         (--workflow-version-tag=<tag>)
-        (--release-status=<status>)
+        [--release-status=<status>]
+        [--git-commit-id=<id>]
+        [--add-patch=<patch>...]
+        [--remove-patch=<patch>...]
 
 Options:
     --workflow-name=<name>         Name of the workflow
-    --workflow-version-tag=<tag>   Version tag of the pipeline entry
-    --release-status=<status>     New release status (DRAFT or RELEASED)
+    --workflow-version-tag=<tag>   Full version tag of the pipeline entry
+                                   (e.g. 0.6.5-rc__20261028055117)
+    --release-status=<status>      Publish the release. Must be RELEASED if set;
+                                   a release cannot revert to DRAFT. Mutually
+                                   exclusive with the edit options below.
+    --git-commit-id=<id>           New git commit SHA for the release. Updated in
+                                   ica_pipelines.yaml and workflows.yaml.
+    --add-patch=<patch>            Patch name to add to the release (repeatable).
+                                   Must be registered in patches.yaml.
+    --remove-patch=<patch>         Patch name to remove from the release
+                                   (repeatable).
     -h --help                      Show this help message
+
+Note:
+    Exactly one mode must be used: either --release-status, or one or more of
+    --git-commit-id / --add-patch / --remove-patch. The two modes are mutually
+    exclusive.
 """,
     "gh-actions-deploy-workflow": """Deploy a workflow version to ICA projects.
 

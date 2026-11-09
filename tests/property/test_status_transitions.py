@@ -181,6 +181,9 @@ class TestReleaseStatusTransitionIrreversibility:
                 "--workflow-name": workflow_name,
                 "--workflow-version-tag": version_tag,
                 "--release-status": "DRAFT",
+                "--git-commit-id": None,
+                "--add-patch": [],
+                "--remove-patch": [],
             }
 
             # Attempting RELEASED → DRAFT must always raise SystemExit
@@ -195,58 +198,51 @@ class TestReleaseStatusTransitionIrreversibility:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-# --- Property 11: Status update idempotence ---
-# Feature: nf-ica-cli, Property 11: For any pipeline entry, updating the release status
-# to the value it already holds SHALL produce no changes to the YAML file and SHALL
-# return a zero exit code.
+# --- Property 11: RELEASED entries are immutable ---
+# A pipeline entry that is already RELEASED cannot be modified in any mode
+# (publish, commit change, or patch change): the handler rejects it with a
+# STATE VIOLATION before performing any ICA/GitHub/YAML side effect.
 
 
-class TestStatusUpdateIdempotence:
-    """**Validates: Requirements 4.5**"""
+class TestReleasedEntriesAreImmutable:
+    """**Validates: Requirements 4.4** (RELEASED is terminal)."""
 
     @given(
         workflow_name=workflow_names,
         version_tag=version_tags,
         git_commit_id=git_commit_ids,
         pipeline_id=pipeline_ids,
-        release_status=st.sampled_from(["DRAFT", "RELEASED"]),
         context=context_names,
         nf_version=nextflow_versions,
+        # Any requested change against a RELEASED entry must be rejected.
+        new_status=st.sampled_from(["DRAFT", "RELEASED"]),
     )
     @settings(max_examples=100)
-    def test_same_status_update_is_noop(
+    def test_released_entry_rejects_any_change(
         self,
         workflow_name: str,
         version_tag: str,
         git_commit_id: str,
         pipeline_id: str,
-        release_status: str,
         context: str,
         nf_version: str,
+        new_status: str,
     ) -> None:
-        """Updating status to the same value produces no file changes and exits 0.
-
-        For any pipeline entry with a given release_status, requesting an update
-        to that same status SHALL exit with code 0 and SHALL NOT modify the YAML.
-        """
-        # Feature: nf-ica-cli, Property 11: Status update idempotence
+        """Any update to a RELEASED entry raises SystemExit and leaves YAML intact."""
         tmp_dir = Path(tempfile.mkdtemp())
         try:
-            # Create the pipeline entry with the given status
             entry_dict = {
                 "workflow_name": workflow_name,
                 "workflow_version": version_tag,
                 "git_commit_id": git_commit_id,
                 "pipeline_id": pipeline_id,
-                "release_status": release_status,
+                "release_status": "RELEASED",
                 "tenants": ["test-tenant"],
                 "contexts": [context],
                 "patch_files": [],
                 "ica_nextflow_version": nf_version,
             }
             pipelines_path = _create_pipelines_yaml(tmp_dir, entry_dict)
-
-            # Read the file content before the operation
             content_before = pipelines_path.read_text()
 
             config = _build_app_config(
@@ -255,27 +251,28 @@ class TestStatusUpdateIdempotence:
                 workflow_version=version_tag,
                 git_commit_id=git_commit_id,
                 pipeline_id=pipeline_id,
-                release_status=release_status,
+                release_status="RELEASED",
                 contexts=[context],
                 ica_nextflow_version=nf_version,
             )
 
-            # Build args dict simulating docopt output
             args = {
                 "--workflow-name": workflow_name,
                 "--workflow-version-tag": version_tag,
-                "--release-status": release_status,
+                "--release-status": new_status,
+                "--git-commit-id": None,
+                "--add-patch": [],
+                "--remove-patch": [],
             }
 
-            # Same-status update must exit with code 0
             with pytest.raises(SystemExit) as exc_info:
                 handle_update_release_status(args, config, tmp_dir)
 
-            assert exc_info.value.code == 0
+            error_msg = str(exc_info.value)
+            assert "RELEASED" in error_msg or "STATE VIOLATION" in error_msg
 
-            # Verify the YAML file was NOT modified
-            content_after = pipelines_path.read_text()
-            assert content_before == content_after
+            # The YAML file is never modified for a rejected RELEASED entry.
+            assert pipelines_path.read_text() == content_before
 
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)

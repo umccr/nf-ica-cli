@@ -1,403 +1,583 @@
-"""Unit tests for the update-workflow-version-release-status handler."""
+"""Unit tests for the update-workflow-version-release-status handler.
+
+The handler operates in two mutually exclusive modes:
+
+* publish (--release-status RELEASED): verify the deployed ICA pipeline matches
+  the configured source commit + patches, release it, flip the YAML to
+  RELEASED, and publish the GitHub release.
+* amend (--git-commit-id / --add-patch / --remove-patch): rebuild the pipeline
+  source, replace the ICA asset, update ica_pipelines.yaml (and workflows.yaml
+  for a commit change), and refresh the GitHub release. Stays DRAFT.
+
+ICA/GitHub side effects are mocked. The handler module path is used for all
+patch targets so the real network/CLI is never touched.
+"""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from nf_ica_cli.config import AppConfig, IcaConfig, PipelineEntry
+from nf_ica_cli.config import (
+    AppConfig,
+    Context,
+    IcaConfig,
+    IcaProject,
+    OidcAuth,
+    PipelineEntry,
+    Tenant,
+    Workflow,
+    WorkflowVersion,
+)
 from nf_ica_cli.handlers.update_release_status import handle_update_release_status
 from nf_ica_cli.patches import PatchEntry
 from nf_ica_cli.yaml_io import load_yaml, save_yaml
 
+HANDLER = "nf_ica_cli.handlers.update_release_status"
+
+
+# ---------------------------------------------------------------------------
+# Fixtures / builders
+# ---------------------------------------------------------------------------
+
 
 def _make_pipeline_entry(
-    workflow_name: str = "oncoanalyser",
-    workflow_version: str = "2.2.0",
-    release_status: str = "DRAFT",
-    patch_files: list = None,
+    workflow_name="sash",
+    workflow_version="0.6.5-rc__20261028055117",
+    git_commit_id="3b9fb48",
+    release_status="DRAFT",
+    patch_files=None,
 ) -> PipelineEntry:
-    """Create a PipelineEntry for testing."""
     return PipelineEntry(
         workflow_name=workflow_name,
         workflow_version=workflow_version,
-        git_commit_id="abc1234",
-        pipeline_id="pipeline-uuid-123",
+        git_commit_id=git_commit_id,
+        pipeline_id="b4ef2744-pipeline",
         release_status=release_status,
         tenants=["umccr-prod"],
-        contexts=["production"],
-        patch_files=patch_files or [],
-        ica_nextflow_version="25.10",
+        contexts=["development"],
+        patch_files=patch_files if patch_files is not None else ["standard_icav2_config"],
+        ica_nextflow_version="25.10.2",
     )
 
 
-def _make_app_config(
-    config_repo: Path,
-    pipelines: list = None,
-    patches: list = None,
-) -> AppConfig:
-    """Create a minimal AppConfig for testing."""
+def _make_ica_config() -> IcaConfig:
+    project = IcaProject(
+        id="ea19a3f5-project",
+        name="development",
+        oidc_auth=[OidcAuth(aws_role_arn="arn:role", secret_arn="arn:secret")],
+        contexts=["development"],
+    )
+    tenant = Tenant(name="umccr-prod", id="tenant-uuid", projects=[project])
+    return IcaConfig(tenants=[tenant], default_nextflow_version="25.10")
+
+
+def _make_workflow() -> Workflow:
+    return Workflow(
+        name="sash",
+        repo_uri="https://github.com/umccr/sash",
+        versions=[
+            WorkflowVersion(
+                tag="0.6.5-rc",
+                git_commit_id="3b9fb48",
+                contexts=["development"],
+                ica_nextflow_version="25.10.2",
+            )
+        ],
+    )
+
+
+def _make_patches() -> list:
+    return [
+        PatchEntry(
+            name="standard_icav2_config",
+            path="patches/std.txt",
+            md5sum="std",
+            description="Standard config",
+        ),
+        PatchEntry(
+            name="extra-patch",
+            path="patches/extra.txt",
+            md5sum="extra",
+            description="Extra patch",
+        ),
+    ]
+
+
+def _make_app_config(config_repo, pipelines=None, patches=None) -> AppConfig:
     return AppConfig(
         config_repo=config_repo,
-        workflows=[],
-        contexts=[],
-        ica_config=IcaConfig(tenants=[], default_nextflow_version=""),
-        pipelines=pipelines or [],
-        patches=patches or [],
+        workflows=[_make_workflow()],
+        contexts=[Context(name="development", description="dev")],
+        ica_config=_make_ica_config(),
+        pipelines=pipelines if pipelines is not None else [_make_pipeline_entry()],
+        patches=patches if patches is not None else _make_patches(),
     )
 
 
 def _make_args(
-    workflow_name: str = "oncoanalyser",
-    version_tag: str = "2.2.0",
-    release_status: str = "RELEASED",
+    workflow_name="sash",
+    version_tag="0.6.5-rc__20261028055117",
+    release_status=None,
+    git_commit_id=None,
+    add_patch=None,
+    remove_patch=None,
 ) -> dict:
-    """Create a minimal docopt-style args dict for update-release-status."""
     return {
         "--workflow-name": workflow_name,
         "--workflow-version-tag": version_tag,
         "--release-status": release_status,
+        "--git-commit-id": git_commit_id,
+        "--add-patch": add_patch or [],
+        "--remove-patch": remove_patch or [],
         "update-workflow-version-release-status": True,
     }
 
 
-def _setup_pipelines_yaml(config_repo: Path, pipelines_list: list) -> Path:
-    """Create ica_pipelines.yaml with given pipeline entries."""
+def _setup_repo(config_repo: Path, pipelines_list: list, patch_files=None) -> None:
+    """Create config/ica_pipelines.yaml, config/workflows.yaml and patch files."""
     config_dir = config_repo / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
-    pipelines_path = config_dir / "ica_pipelines.yaml"
-    data = {"pipelines": pipelines_list}
-    save_yaml(pipelines_path, data)
-    return pipelines_path
+    save_yaml(config_dir / "ica_pipelines.yaml", {"pipelines": pipelines_list})
+    save_yaml(
+        config_dir / "workflows.yaml",
+        {
+            "workflows": [
+                {
+                    "name": "sash",
+                    "repo_uri": "https://github.com/umccr/sash",
+                    "versions": [
+                        {
+                            "tag": "0.6.5-rc",
+                            "git_commit_id": "3b9fb48",
+                            "contexts": ["development"],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    patches_dir = config_repo / "patches"
+    patches_dir.mkdir(parents=True, exist_ok=True)
+    for fname in patch_files or ["std.txt", "extra.txt"]:
+        (patches_dir / fname).write_text("patch content")
 
 
-class TestHandleUpdateReleaseStatus:
-    """Tests for handle_update_release_status handler."""
+def _raw_pipeline(**overrides) -> dict:
+    base = {
+        "workflow_name": "sash",
+        "workflow_version": "0.6.5-rc__20261028055117",
+        "git_commit_id": "3b9fb48",
+        "pipeline_id": "b4ef2744-pipeline",
+        "release_status": "DRAFT",
+        "tenants": ["umccr-prod"],
+        "contexts": ["development"],
+        "patch_files": ["standard_icav2_config"],
+        "ica_nextflow_version": "25.10.2",
+    }
+    base.update(overrides)
+    return base
 
-    def test_updates_draft_to_released(self, tmp_path):
-        """Successfully transitions DRAFT → RELEASED and writes YAML."""
-        config_repo = tmp_path / "config_repo"
-        pipelines_path = _setup_pipelines_yaml(config_repo, [
-            {
-                "workflow_name": "oncoanalyser",
-                "workflow_version": "2.2.0",
-                "git_commit_id": "abc1234",
-                "pipeline_id": "pipeline-uuid-123",
-                "release_status": "DRAFT",
-                "tenants": ["umccr-prod"],
-                "contexts": ["production"],
-                "patch_files": [],
-                "ica_nextflow_version": "25.10",
-            }
-        ])
 
-        pipeline = _make_pipeline_entry(release_status="DRAFT")
-        config = _make_app_config(config_repo, pipelines=[pipeline])
-        args = _make_args(release_status="RELEASED")
+@pytest.fixture
+def ica_token(monkeypatch):
+    monkeypatch.setenv("ICAV2_ACCESS_TOKEN", "test-token")
 
-        handle_update_release_status(args, config, config_repo)
 
-        # Verify the YAML was updated
-        data = load_yaml(pipelines_path)
-        assert data["pipelines"][0]["release_status"] == "RELEASED"
+# ---------------------------------------------------------------------------
+# Mode selection / validation
+# ---------------------------------------------------------------------------
 
-    def test_exits_when_pipeline_not_found(self, tmp_path):
-        """Exits with SystemExit when no matching pipeline entry exists (Req 4.2)."""
-        config_repo = tmp_path / "config_repo"
-        _setup_pipelines_yaml(config_repo, [])
 
+class TestModeValidation:
+    def test_requires_a_mode(self, tmp_path, ica_token):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args()  # nothing set
+
+        with pytest.raises(SystemExit, match="Nothing to do"):
+            handle_update_release_status(args, config, config_repo)
+
+    def test_release_status_and_edit_are_mutually_exclusive(self, tmp_path, ica_token):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(release_status="RELEASED", add_patch=["extra-patch"])
+
+        with pytest.raises(SystemExit, match="mutually exclusive"):
+            handle_update_release_status(args, config, config_repo)
+
+    def test_pipeline_not_found(self, tmp_path, ica_token):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [])
         config = _make_app_config(config_repo, pipelines=[])
-        args = _make_args(workflow_name="nonexistent", version_tag="1.0.0")
+        args = _make_args(release_status="RELEASED")
 
         with pytest.raises(SystemExit, match="No pipeline entry found"):
             handle_update_release_status(args, config, config_repo)
 
-    def test_exits_on_invalid_release_status(self, tmp_path):
-        """Exits with SystemExit for invalid release status value (Req 4.3)."""
-        config_repo = tmp_path / "config_repo"
-        _setup_pipelines_yaml(config_repo, [])
-
-        config = _make_app_config(config_repo)
-        args = _make_args(release_status="INVALID")
-
-        with pytest.raises(SystemExit, match="Invalid release status"):
-            handle_update_release_status(args, config, config_repo)
-
-    def test_rejects_released_to_draft_transition(self, tmp_path):
-        """Exits with SystemExit when reverting RELEASED → DRAFT (Req 4.4)."""
-        config_repo = tmp_path / "config_repo"
-        _setup_pipelines_yaml(config_repo, [
-            {
-                "workflow_name": "oncoanalyser",
-                "workflow_version": "2.2.0",
-                "git_commit_id": "abc1234",
-                "pipeline_id": "pipeline-uuid-123",
-                "release_status": "RELEASED",
-                "tenants": ["umccr-prod"],
-                "contexts": ["production"],
-                "patch_files": [],
-                "ica_nextflow_version": "25.10",
-            }
-        ])
-
-        pipeline = _make_pipeline_entry(release_status="RELEASED")
-        config = _make_app_config(config_repo, pipelines=[pipeline])
-        args = _make_args(release_status="DRAFT")
-
-        with pytest.raises(SystemExit, match="Cannot revert release status"):
-            handle_update_release_status(args, config, config_repo)
-
-    def test_noop_when_status_unchanged(self, tmp_path):
-        """Exits with code 0 without modifying YAML when status is same (Req 4.5)."""
-        config_repo = tmp_path / "config_repo"
-        pipelines_path = _setup_pipelines_yaml(config_repo, [
-            {
-                "workflow_name": "oncoanalyser",
-                "workflow_version": "2.2.0",
-                "git_commit_id": "abc1234",
-                "pipeline_id": "pipeline-uuid-123",
-                "release_status": "DRAFT",
-                "tenants": ["umccr-prod"],
-                "contexts": ["production"],
-                "patch_files": [],
-                "ica_nextflow_version": "25.10",
-            }
-        ])
-
-        pipeline = _make_pipeline_entry(release_status="DRAFT")
-        config = _make_app_config(config_repo, pipelines=[pipeline])
-        args = _make_args(release_status="DRAFT")
-
-        with pytest.raises(SystemExit) as exc_info:
-            handle_update_release_status(args, config, config_repo)
-
-        # sys.exit(0) raises SystemExit with code 0
-        assert exc_info.value.code == 0
-
-    def test_verifies_patches_registered_when_releasing(self, tmp_path):
-        """Exits when releasing and a patch is not registered (Req 4.6)."""
-        config_repo = tmp_path / "config_repo"
-        _setup_pipelines_yaml(config_repo, [
-            {
-                "workflow_name": "oncoanalyser",
-                "workflow_version": "2.2.0",
-                "git_commit_id": "abc1234",
-                "pipeline_id": "pipeline-uuid-123",
-                "release_status": "DRAFT",
-                "tenants": ["umccr-prod"],
-                "contexts": ["production"],
-                "patch_files": ["missing-patch"],
-                "ica_nextflow_version": "25.10",
-            }
-        ])
-
-        pipeline = _make_pipeline_entry(
-            release_status="DRAFT",
-            patch_files=["missing-patch"],
+    def test_already_released_cannot_be_modified(self, tmp_path, ica_token):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline(release_status="RELEASED")])
+        config = _make_app_config(
+            config_repo, pipelines=[_make_pipeline_entry(release_status="RELEASED")]
         )
-        config = _make_app_config(config_repo, pipelines=[pipeline], patches=[])
         args = _make_args(release_status="RELEASED")
+
+        with pytest.raises(SystemExit, match="already RELEASED"):
+            handle_update_release_status(args, config, config_repo)
+
+    def test_release_status_must_be_released(self, tmp_path, ica_token):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(release_status="DRAFT")
+
+        with pytest.raises(SystemExit, match="may only be set to RELEASED"):
+            handle_update_release_status(args, config, config_repo)
+
+    def test_requires_ica_token(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ICAV2_ACCESS_TOKEN", raising=False)
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(release_status="RELEASED")
+
+        with pytest.raises(SystemExit, match="ICAV2_ACCESS_TOKEN"):
+            handle_update_release_status(args, config, config_repo)
+
+
+# ---------------------------------------------------------------------------
+# Mode A: publish
+# ---------------------------------------------------------------------------
+
+
+class TestRelease:
+    @patch(f"{HANDLER}.update_github_release")
+    @patch(f"{HANDLER}.release_pipeline")
+    @patch(f"{HANDLER}.get_github_blob_base_url", return_value="https://github.com/umccr/nf-ica/blob/sha")
+    @patch(f"{HANDLER}.generate_diffs", return_value=[])
+    @patch(f"{HANDLER}.export_pipeline_source")
+    @patch(f"{HANDLER}.apply_patches")
+    @patch(f"{HANDLER}.clone_at_commit")
+    def test_releases_when_pipeline_matches(
+        self,
+        mock_clone,
+        mock_apply,
+        mock_export,
+        mock_diffs,
+        mock_baseurl,
+        mock_release,
+        mock_update_release,
+        tmp_path,
+        ica_token,
+    ):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(release_status="RELEASED")
+
+        handle_update_release_status(args, config, config_repo)
+
+        # ICA pipeline released, YAML flipped, GitHub release published.
+        mock_release.assert_called_once_with(
+            project_id="ea19a3f5-project", pipeline_id="b4ef2744-pipeline"
+        )
+        data = load_yaml(config_repo / "config" / "ica_pipelines.yaml")
+        assert data["pipelines"][0]["release_status"] == "RELEASED"
+        mock_update_release.assert_called_once()
+        kwargs = mock_update_release.call_args.kwargs
+        assert kwargs["tag_name"] == "sash/0.6.5-rc__20261028055117"
+        assert kwargs["publish"] is True
+
+    @patch(f"{HANDLER}.release_pipeline")
+    @patch(f"{HANDLER}.generate_diffs")
+    @patch(f"{HANDLER}.export_pipeline_source")
+    @patch(f"{HANDLER}.apply_patches")
+    @patch(f"{HANDLER}.clone_at_commit")
+    def test_refuses_release_when_pipeline_diverges(
+        self,
+        mock_clone,
+        mock_apply,
+        mock_export,
+        mock_diffs,
+        mock_release,
+        tmp_path,
+        ica_token,
+    ):
+        from nf_ica_cli.diff_generator import FileDiff
+
+        mock_diffs.return_value = [
+            FileDiff(
+                relative_path="main.nf",
+                diff_content="diff",
+                is_new_file=False,
+                is_deleted=False,
+            )
+        ]
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(release_status="RELEASED")
+
+        with pytest.raises(SystemExit, match="does not match"):
+            handle_update_release_status(args, config, config_repo)
+
+        mock_release.assert_not_called()
+        data = load_yaml(config_repo / "config" / "ica_pipelines.yaml")
+        assert data["pipelines"][0]["release_status"] == "DRAFT"
+
+    def test_release_fails_when_patch_unregistered(self, tmp_path, ica_token):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline(patch_files=["ghost"])])
+        config = _make_app_config(
+            config_repo,
+            pipelines=[_make_pipeline_entry(patch_files=["ghost"])],
+        )
+        args = _make_args(release_status="RELEASED")
+
+        with pytest.raises(SystemExit, match="not .*registered"):
+            handle_update_release_status(args, config, config_repo)
+
+
+# ---------------------------------------------------------------------------
+# Mode B: amend
+# ---------------------------------------------------------------------------
+
+
+class TestAmend:
+    @patch(f"{HANDLER}.update_github_release")
+    @patch(f"{HANDLER}.create_pipeline_zip")
+    @patch(f"{HANDLER}.update_pipeline")
+    @patch(f"{HANDLER}.get_github_blob_base_url", return_value="https://github.com/umccr/nf-ica/blob/sha")
+    @patch(f"{HANDLER}.apply_patches")
+    @patch(f"{HANDLER}.clone_at_commit")
+    def test_add_patch_updates_yaml_and_ica_and_release(
+        self,
+        mock_clone,
+        mock_apply,
+        mock_baseurl,
+        mock_update_pipeline,
+        mock_zip,
+        mock_update_release,
+        tmp_path,
+        ica_token,
+    ):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(add_patch=["extra-patch"])
+
+        handle_update_release_status(args, config, config_repo)
+
+        # patch_files updated in ica_pipelines.yaml, entry stays DRAFT.
+        data = load_yaml(config_repo / "config" / "ica_pipelines.yaml")
+        entry = data["pipelines"][0]
+        assert entry["patch_files"] == ["standard_icav2_config", "extra-patch"]
+        assert entry["release_status"] == "DRAFT"
+
+        mock_update_pipeline.assert_called_once()
+        # Release notes refreshed, asset re-uploaded, not published.
+        kwargs = mock_update_release.call_args.kwargs
+        assert kwargs["publish"] is False
+        assert len(kwargs["artefact_paths"]) == 1
+
+    @patch(f"{HANDLER}.update_github_release")
+    @patch(f"{HANDLER}.create_pipeline_zip")
+    @patch(f"{HANDLER}.update_pipeline")
+    @patch(f"{HANDLER}.get_github_blob_base_url", return_value="https://x/blob/sha")
+    @patch(f"{HANDLER}.apply_patches")
+    @patch(f"{HANDLER}.clone_at_commit")
+    def test_remove_patch(
+        self,
+        mock_clone,
+        mock_apply,
+        mock_baseurl,
+        mock_update_pipeline,
+        mock_zip,
+        mock_update_release,
+        tmp_path,
+        ica_token,
+    ):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(remove_patch=["standard_icav2_config"])
+
+        handle_update_release_status(args, config, config_repo)
+
+        data = load_yaml(config_repo / "config" / "ica_pipelines.yaml")
+        assert data["pipelines"][0]["patch_files"] == []
+
+    @patch(f"{HANDLER}.update_github_release")
+    @patch(f"{HANDLER}.create_pipeline_zip")
+    @patch(f"{HANDLER}.update_pipeline")
+    @patch(f"{HANDLER}.get_github_blob_base_url", return_value="")
+    @patch(f"{HANDLER}.apply_patches")
+    @patch(f"{HANDLER}.clone_at_commit")
+    def test_git_commit_updates_both_yaml_files(
+        self,
+        mock_clone,
+        mock_apply,
+        mock_baseurl,
+        mock_update_pipeline,
+        mock_zip,
+        mock_update_release,
+        tmp_path,
+        ica_token,
+    ):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(git_commit_id="abcdef1")
+
+        handle_update_release_status(args, config, config_repo)
+
+        pipelines = load_yaml(config_repo / "config" / "ica_pipelines.yaml")
+        assert pipelines["pipelines"][0]["git_commit_id"] == "abcdef1"
+
+        workflows = load_yaml(config_repo / "config" / "workflows.yaml")
+        ver = workflows["workflows"][0]["versions"][0]
+        assert ver["tag"] == "0.6.5-rc"
+        assert ver["git_commit_id"] == "abcdef1"
+
+        # Clone uses the new commit.
+        assert mock_clone.call_args.args[1] == "abcdef1"
+
+    def test_add_unregistered_patch_fails(self, tmp_path, ica_token):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(add_patch=["ghost-patch"])
 
         with pytest.raises(SystemExit, match="not registered"):
             handle_update_release_status(args, config, config_repo)
 
-    def test_verifies_patch_file_exists_on_disk_when_releasing(self, tmp_path):
-        """Exits when releasing and patch file doesn't exist on disk (Req 4.6)."""
-        config_repo = tmp_path / "config_repo"
-        (config_repo / "config").mkdir(parents=True)
-        (config_repo / "patches").mkdir(parents=True)
+    def test_invalid_git_commit_fails(self, tmp_path, ica_token):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(git_commit_id="ZZZ")
 
-        _setup_pipelines_yaml(config_repo, [
-            {
-                "workflow_name": "oncoanalyser",
-                "workflow_version": "2.2.0",
-                "git_commit_id": "abc1234",
-                "pipeline_id": "pipeline-uuid-123",
-                "release_status": "DRAFT",
-                "tenants": ["umccr-prod"],
-                "contexts": ["production"],
-                "patch_files": ["my-patch"],
-                "ica_nextflow_version": "25.10",
-            }
-        ])
-
-        # Patch is registered but file doesn't exist on disk
-        patch = PatchEntry(
-            name="my-patch",
-            path="patches/abc123.txt",
-            md5sum="abc123",
-            description="A patch",
-        )
-
-        pipeline = _make_pipeline_entry(
-            release_status="DRAFT",
-            patch_files=["my-patch"],
-        )
-        config = _make_app_config(
-            config_repo, pipelines=[pipeline], patches=[patch]
-        )
-        args = _make_args(release_status="RELEASED")
-
-        with pytest.raises(SystemExit, match="Patch file missing"):
+        with pytest.raises(SystemExit, match="Invalid git commit"):
             handle_update_release_status(args, config, config_repo)
 
-    def test_releases_successfully_with_valid_patches(self, tmp_path):
-        """Successfully releases when all patches are registered and exist."""
-        config_repo = tmp_path / "config_repo"
-        (config_repo / "config").mkdir(parents=True)
-        (config_repo / "patches").mkdir(parents=True)
-
-        # Create the patch file on disk
-        patch_file = config_repo / "patches" / "abc123.txt"
-        patch_file.write_text("patch content")
-
-        pipelines_path = _setup_pipelines_yaml(config_repo, [
-            {
-                "workflow_name": "oncoanalyser",
-                "workflow_version": "2.2.0",
-                "git_commit_id": "abc1234",
-                "pipeline_id": "pipeline-uuid-123",
-                "release_status": "DRAFT",
-                "tenants": ["umccr-prod"],
-                "contexts": ["production"],
-                "patch_files": ["my-patch"],
-                "ica_nextflow_version": "25.10",
-            }
-        ])
-
-        patch = PatchEntry(
-            name="my-patch",
-            path="patches/abc123.txt",
-            md5sum="abc123",
-            description="A patch",
-        )
-        pipeline = _make_pipeline_entry(
-            release_status="DRAFT",
-            patch_files=["my-patch"],
-        )
-        config = _make_app_config(
-            config_repo, pipelines=[pipeline], patches=[patch]
-        )
-        args = _make_args(release_status="RELEASED")
+    @patch(f"{HANDLER}.update_github_release")
+    @patch(f"{HANDLER}.create_pipeline_zip")
+    @patch(f"{HANDLER}.update_pipeline")
+    @patch(f"{HANDLER}.get_github_blob_base_url", return_value="")
+    @patch(f"{HANDLER}.apply_patches")
+    @patch(f"{HANDLER}.clone_at_commit")
+    def test_duplicate_add_is_noop_info(
+        self,
+        mock_clone,
+        mock_apply,
+        mock_baseurl,
+        mock_update_pipeline,
+        mock_zip,
+        mock_update_release,
+        tmp_path,
+        ica_token,
+        capsys,
+    ):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(add_patch=["standard_icav2_config"])
 
         handle_update_release_status(args, config, config_repo)
 
-        # Verify the YAML was updated
-        data = load_yaml(pipelines_path)
-        assert data["pipelines"][0]["release_status"] == "RELEASED"
+        out = capsys.readouterr().out
+        assert "already applied" in out
+        data = load_yaml(config_repo / "config" / "ica_pipelines.yaml")
+        # Unchanged — still a single copy.
+        assert data["pipelines"][0]["patch_files"] == ["standard_icav2_config"]
 
-    def test_preserves_yaml_comments(self, tmp_path):
-        """YAML comments are preserved after status update (Req 4.7)."""
-        config_repo = tmp_path / "config_repo"
+    @patch(f"{HANDLER}.update_github_release")
+    @patch(f"{HANDLER}.create_pipeline_zip")
+    @patch(f"{HANDLER}.update_pipeline")
+    @patch(f"{HANDLER}.get_github_blob_base_url", return_value="")
+    @patch(f"{HANDLER}.apply_patches")
+    @patch(f"{HANDLER}.clone_at_commit")
+    def test_remove_absent_patch_is_noop_info(
+        self,
+        mock_clone,
+        mock_apply,
+        mock_baseurl,
+        mock_update_pipeline,
+        mock_zip,
+        mock_update_release,
+        tmp_path,
+        ica_token,
+        capsys,
+    ):
+        config_repo = tmp_path / "repo"
+        _setup_repo(config_repo, [_raw_pipeline()])
+        config = _make_app_config(config_repo)
+        args = _make_args(remove_patch=["extra-patch"])
+
+        handle_update_release_status(args, config, config_repo)
+
+        out = capsys.readouterr().out
+        assert "nothing to remove" in out
+        data = load_yaml(config_repo / "config" / "ica_pipelines.yaml")
+        assert data["pipelines"][0]["patch_files"] == ["standard_icav2_config"]
+
+    @patch(f"{HANDLER}.update_github_release")
+    @patch(f"{HANDLER}.create_pipeline_zip")
+    @patch(f"{HANDLER}.update_pipeline")
+    @patch(f"{HANDLER}.get_github_blob_base_url", return_value="")
+    @patch(f"{HANDLER}.apply_patches")
+    @patch(f"{HANDLER}.clone_at_commit")
+    def test_preserves_yaml_comments(
+        self,
+        mock_clone,
+        mock_apply,
+        mock_baseurl,
+        mock_update_pipeline,
+        mock_zip,
+        mock_update_release,
+        tmp_path,
+        ica_token,
+    ):
+        config_repo = tmp_path / "repo"
         config_dir = config_repo / "config"
         config_dir.mkdir(parents=True)
-
-        # Write YAML with a comment
-        pipelines_path = config_dir / "ica_pipelines.yaml"
-        pipelines_path.write_text(
-            "# This is a tracking file for deployed pipelines\n"
+        (config_repo / "patches").mkdir(parents=True)
+        (config_repo / "patches" / "std.txt").write_text("x")
+        (config_repo / "patches" / "extra.txt").write_text("x")
+        (config_dir / "workflows.yaml").write_text(
+            "workflows:\n"
+            "  - name: sash\n"
+            "    repo_uri: https://github.com/umccr/sash\n"
+            "    versions:\n"
+            "      - tag: 0.6.5-rc\n"
+            "        git_commit_id: 3b9fb48\n"
+            "        contexts:\n"
+            "          - development\n"
+        )
+        (config_dir / "ica_pipelines.yaml").write_text(
+            "# tracking file\n"
             "pipelines:\n"
-            "  - workflow_name: oncoanalyser\n"
-            "    workflow_version: '2.2.0'\n"
-            "    git_commit_id: abc1234\n"
-            "    pipeline_id: pipeline-uuid-123\n"
+            "  - workflow_name: sash\n"
+            "    workflow_version: 0.6.5-rc__20261028055117\n"
+            "    git_commit_id: 3b9fb48\n"
+            "    pipeline_id: b4ef2744-pipeline\n"
             "    release_status: DRAFT\n"
             "    tenants:\n"
             "      - umccr-prod\n"
             "    contexts:\n"
-            "      - production\n"
-            "    patch_files: []\n"
-            "    ica_nextflow_version: '25.10'\n"
+            "      - development\n"
+            "    patch_files:\n"
+            "      - standard_icav2_config\n"
+            "    ica_nextflow_version: 25.10.2\n"
         )
-
-        pipeline = _make_pipeline_entry(release_status="DRAFT")
-        config = _make_app_config(config_repo, pipelines=[pipeline])
-        args = _make_args(release_status="RELEASED")
+        config = _make_app_config(config_repo)
+        args = _make_args(add_patch=["extra-patch"])
 
         handle_update_release_status(args, config, config_repo)
 
-        # Read raw content and verify comment is preserved
-        raw_content = pipelines_path.read_text()
-        assert "# This is a tracking file for deployed pipelines" in raw_content
-        assert "RELEASED" in raw_content
-
-    def test_updates_correct_entry_among_multiple(self, tmp_path):
-        """Updates only the matching entry when multiple pipelines exist."""
-        config_repo = tmp_path / "config_repo"
-        pipelines_path = _setup_pipelines_yaml(config_repo, [
-            {
-                "workflow_name": "pipeline-a",
-                "workflow_version": "1.0.0",
-                "git_commit_id": "aaa1111",
-                "pipeline_id": "uuid-a",
-                "release_status": "DRAFT",
-                "tenants": ["tenant-1"],
-                "contexts": ["dev"],
-                "patch_files": [],
-                "ica_nextflow_version": "25.10",
-            },
-            {
-                "workflow_name": "oncoanalyser",
-                "workflow_version": "2.2.0",
-                "git_commit_id": "abc1234",
-                "pipeline_id": "uuid-b",
-                "release_status": "DRAFT",
-                "tenants": ["umccr-prod"],
-                "contexts": ["production"],
-                "patch_files": [],
-                "ica_nextflow_version": "25.10",
-            },
-        ])
-
-        # Only the second one matches
-        pipelines = [
-            _make_pipeline_entry(
-                workflow_name="pipeline-a",
-                workflow_version="1.0.0",
-                release_status="DRAFT",
-            ),
-            _make_pipeline_entry(
-                workflow_name="oncoanalyser",
-                workflow_version="2.2.0",
-                release_status="DRAFT",
-            ),
-        ]
-        config = _make_app_config(config_repo, pipelines=pipelines)
-        args = _make_args(
-            workflow_name="oncoanalyser",
-            version_tag="2.2.0",
-            release_status="RELEASED",
-        )
-
-        handle_update_release_status(args, config, config_repo)
-
-        data = load_yaml(pipelines_path)
-        # First pipeline unchanged
-        assert data["pipelines"][0]["release_status"] == "DRAFT"
-        # Second pipeline updated
-        assert data["pipelines"][1]["release_status"] == "RELEASED"
-
-    def test_noop_released_to_released(self, tmp_path):
-        """No-op when current and new status are both RELEASED (Req 4.5)."""
-        config_repo = tmp_path / "config_repo"
-        _setup_pipelines_yaml(config_repo, [
-            {
-                "workflow_name": "oncoanalyser",
-                "workflow_version": "2.2.0",
-                "git_commit_id": "abc1234",
-                "pipeline_id": "pipeline-uuid-123",
-                "release_status": "RELEASED",
-                "tenants": ["umccr-prod"],
-                "contexts": ["production"],
-                "patch_files": [],
-                "ica_nextflow_version": "25.10",
-            }
-        ])
-
-        pipeline = _make_pipeline_entry(release_status="RELEASED")
-        config = _make_app_config(config_repo, pipelines=[pipeline])
-        args = _make_args(release_status="RELEASED")
-
-        with pytest.raises(SystemExit) as exc_info:
-            handle_update_release_status(args, config, config_repo)
-
-        assert exc_info.value.code == 0
+        raw = (config_dir / "ica_pipelines.yaml").read_text()
+        assert "# tracking file" in raw
+        assert "extra-patch" in raw

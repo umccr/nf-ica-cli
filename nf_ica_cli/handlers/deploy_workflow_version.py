@@ -14,7 +14,6 @@ from nf_ica_cli.tag_codec import TagMetadata, encode_tag_message, make_tag_name
 from nf_ica_cli.validators import (
     validate_context,
     validate_git_commit_id,
-    validate_release_status,
 )
 
 
@@ -26,16 +25,18 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
 
     Flow:
     1. Extract flags from docopt args
-    2. Validate release status
-    3. Validate the git commit ID
-    4. Validate each context value against defined contexts
-    5. Verify version tag is registered in workflows.yaml for the workflow
-    6. Verify each patch name exists in the patches registry
-    7. Ensure we're on an up-to-date main branch
-    8. Generate tag name with UTC timestamp
-    9. Check tag doesn't already exist
-    10. Encode tag metadata as YAML
-    11. Create annotated tag
+    2. Validate the git commit ID
+    3. Validate each context value against defined contexts
+    4. Verify version tag is registered in workflows.yaml for the workflow
+    5. Verify each patch name exists in the patches registry
+    6. Ensure we're on an up-to-date main branch
+    7. Generate tag name with UTC timestamp
+    8. Check tag doesn't already exist
+    9. Encode tag metadata as YAML (release_status is always DRAFT)
+    10. Create annotated tag
+
+    The release is always encoded as DRAFT. Publishing a release is a separate,
+    verified step performed by update-workflow-version-release-status.
 
     Args:
         args: Parsed docopt arguments dict.
@@ -51,18 +52,13 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
     git_commit_id: str = args["--workflow-version-git-commit-id"]
     contexts: List[str] = args["--workflow-version-context"]
     patch_names: List[str] = args["--workflow-patch-name"] or []
-    release_status: str = args["--release-status"]
     description: str = args["--workflow-version-description"] or ""
 
-    # 2. Validate release status (Req 3.5)
-    try:
-        validate_release_status(release_status)
-    except ValueError as e:
-        raise SystemExit(
-            f"Error: [VALIDATION] {e}"
-        ) from e
+    # Releases are always created as DRAFT; publishing is a separate, verified
+    # step (update-workflow-version-release-status).
+    release_status = "DRAFT"
 
-    # 3. Validate the git commit ID (fail-fast so an invalid commit is rejected
+    # 2. Validate the git commit ID (fail-fast so an invalid commit is rejected
     #    at tag-creation time rather than later during deployment/checkout)
     try:
         validate_git_commit_id(git_commit_id)
@@ -71,7 +67,7 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
             f"Error: [VALIDATION] {e}"
         ) from e
 
-    # 4. Validate each context value (Req 3.7)
+    # 3. Validate each context value (Req 3.7)
     defined_context_names = [ctx.name for ctx in config.contexts]
     for ctx_value in contexts:
         try:
@@ -81,7 +77,7 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
                 f"Error: [VALIDATION] {e}"
             ) from e
 
-    # 5. Verify version tag is registered in workflows.yaml (Req 3.6)
+    # 4. Verify version tag is registered in workflows.yaml (Req 3.6)
     workflow_found = False
     version_registered = False
     for wf in config.workflows:
@@ -104,6 +100,24 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
             f"Error: [VALIDATION] Version tag '{version_tag}' is not registered "
             f"for workflow '{workflow_name}' in workflows.yaml. "
             f"Use 'add-workflow-version' to register the version first."
+        )
+
+    # 5. Reject duplicate patch names. A patch listed twice is applied twice
+    #    with `git apply`; the second application fails ("patch does not apply")
+    #    because the first already changed the context lines. Catch it here at
+    #    tag-creation time rather than mid-deploy.
+    seen: set = set()
+    duplicates: List[str] = []
+    for patch_name in patch_names:
+        if patch_name in seen and patch_name not in duplicates:
+            duplicates.append(patch_name)
+        seen.add(patch_name)
+    if duplicates:
+        raise SystemExit(
+            f"Error: [VALIDATION] Duplicate --workflow-patch-name value(s): "
+            f"{', '.join(duplicates)}. Each patch must be listed at most once; "
+            f"a patch applied twice fails because the second application no "
+            f"longer matches the already-patched source."
         )
 
     # 6. Verify each patch name exists in patches registry (Req 3.4)
@@ -134,7 +148,7 @@ def handle_deploy_workflow_version(args: dict, config: AppConfig, config_repo: P
             f"Cannot create a duplicate tag."
         )
 
-    # 10. Encode tag metadata as YAML (Req 3.2)
+    # 10. Encode tag metadata as YAML (Req 3.2); release_status is always DRAFT
     metadata = TagMetadata(
         git_commit_id=git_commit_id,
         contexts=contexts,
